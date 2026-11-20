@@ -1,0 +1,14 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "karpo-browser",
+  "description": "A browser for AI agents, System 1 + System 2",
+  "owner": { "name": "Karpo" },
+  "plugins": [
+    {
+      "name": "karpo-browser",
+      "description": "Browse with a fast decision model as System 1: the MCP server and the skill that tells your agent how to use it",
+      "source": "./",
+      "category": "development"
+    }
+  ]
+}

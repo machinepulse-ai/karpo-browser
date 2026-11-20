@@ -1,0 +1,46 @@
+{
+  "name": "karpo-browser",
+  "version": "0.1.0",
+  "description": "A browser for AI agents: a decision model (System 1) does the steps on the page, your agent (System 2) plans, reads and answers",
+  "license": "Apache-2.0",
+  "repository": "github:machinepulse-ai/karpo-browser",
+  "keywords": [
+    "browser",
+    "agent",
+    "ai-agent",
+    "mcp",
+    "decision-model",
+    "automation",
+    "chrome"
+  ],
+  "homepage": "https://github.com/machinepulse-ai/karpo-browser#readme",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check": "tsc --noEmit && biome check .",
+    "test": "vitest run",
+    "conformance": "node test/conformance/replay.ts",
+    "prepack": "npm run build"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.8",
+    "@types/node": "^26.0.0",
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
+  },
+  "bin": {
+    "karpo-browser": "./dist/cli.js"
+  }
+}

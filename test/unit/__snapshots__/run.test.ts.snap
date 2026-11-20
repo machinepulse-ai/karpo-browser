@@ -1,0 +1,1093 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`a run that repeats a round of steps on a page that does not change > packs the requests the base code packed 1`] = `
+[
+  {
+    "sha256": "586b2dfb8fd52a6bc40597e2e0a75618be8dc9072471e253a660363bc4f66e82",
+    "state": {
+      "page": {
+        "elements": [
+          "viewport (scrolled 0/0px):",
+          "  main",
+          "    heading Find parking",
+          "    2 button ARRIVE AFTER",
+          "    3 button CLOSE",
+          "    4 button | 8:30 am",
+        ],
+        "title": "Parking",
+        "url": "https://park.test/search",
+      },
+      "run": {
+        "actions": [],
+        "actions_without_change_in_a_row": 0,
+        "decisions": 0,
+        "page_state_seen": 1,
+        "pages": [
+          {
+            "url": "park.test/search",
+            "visits": 1,
+          },
+        ],
+        "seconds": 0,
+      },
+      "task": {
+        "goal": "Park after 8:30 am",
+      },
+      "values": [],
+    },
+  },
+  {
+    "sha256": "c8d85db7b8c3438ea7869565ef6f338140295d2cb94948b8ef6921fadaacaf89",
+    "state": {
+      "page": {
+        "elements": [
+          "viewport (scrolled 0/0px):",
+          "  main",
+          "    heading Find parking",
+          "    2 button ARRIVE AFTER · tried here 1 times: → the page did not change",
+          "    3 button CLOSE",
+          "    4 button | 8:30 am",
+        ],
+        "title": "Parking",
+        "url": "https://park.test/search",
+      },
+      "recent_actions": "CLICK 2 button ARRIVE AFTER
+  → the page did not change",
+      "run": {
+        "actions": [
+          {
+            "action": "CLICK button ARRIVE AFTER",
+            "changed_page": 0,
+            "times": 1,
+          },
+        ],
+        "actions_without_change_in_a_row": 1,
+        "decisions": 1,
+        "page_state_seen": 2,
+        "pages": [
+          {
+            "url": "park.test/search",
+            "visits": 1,
+          },
+        ],
+        "seconds": 0,
+      },
+      "task": {
+        "goal": "Park after 8:30 am",
+      },
+      "values": [],
+    },
+  },
+  {
+    "sha256": "029cab54d66dc97a7f488da21a65d5dec13e8bd7738f71634ff670a36354c704",
+    "state": {
+      "page": {
+        "elements": [
+          "viewport (scrolled 0/0px):",
+          "  main",
+          "    heading Find parking",
+          "    2 button ARRIVE AFTER · tried here 1 times: → the page did not change",
+          "    3 button CLOSE · tried here 1 times: → the page did not change",
+          "    4 button | 8:30 am",
+        ],
+        "title": "Parking",
+        "url": "https://park.test/search",
+      },
+      "recent_actions": "CLICK 2 button ARRIVE AFTER
+  → the page did not change
+CLICK 3 button CLOSE
+  → the page did not change",
+      "run": {
+        "actions": [
+          {
+            "action": "CLICK button ARRIVE AFTER",
+            "changed_page": 0,
+            "times": 1,
+          },
+          {
+            "action": "CLICK button CLOSE",
+            "changed_page": 0,
+            "times": 1,
+          },
+        ],
+        "actions_without_change_in_a_row": 2,
+        "decisions": 2,
+        "page_state_seen": 3,
+        "pages": [
+          {
+            "url": "park.test/search",
+            "visits": 1,
+          },
+        ],
+        "seconds": 0,
+      },
+      "task": {
+        "goal": "Park after 8:30 am",
+      },
+      "values": [],
+    },
+  },
+  {
+    "sha256": "768be7d97c2a350c97ea1cb17b8618afe3634a129edf83294a2dd6dee618c822",
+    "state": {
+      "page": {
+        "elements": [
+          "viewport (scrolled 0/0px):",
+          "  main",
+          "    heading Find parking",
+          "    2 button ARRIVE AFTER · tried here 1 times: → the page did not change",
+          "    3 button CLOSE · tried here 1 times: → the page did not change",
+          "    4 button | 8:30 am · tried here 1 times: → the page did not change",
+        ],
+        "title": "Parking",
+        "url": "https://park.test/search",
+      },
+      "recent_actions": "CLICK 2 button ARRIVE AFTER
+  → the page did not change
+CLICK 3 button CLOSE
+  → the page did not change
+CLICK 4 button | 8:30 am
+  → the page did not change",
+      "run": {
+        "actions": [
+          {
+            "action": "CLICK button ARRIVE AFTER",
+            "changed_page": 0,
+            "times": 1,
+          },
+          {
+            "action": "CLICK button CLOSE",
+            "changed_page": 0,
+            "times": 1,
+          },
+          {
+            "action": "CLICK button | 8:30 am",
+            "changed_page": 0,
+            "times": 1,
+          },
+        ],
+        "actions_without_change_in_a_row": 3,
+        "decisions": 3,
+        "page_state_seen": 4,
+        "pages": [
+          {
+            "url": "park.test/search",
+            "visits": 1,
+          },
+        ],
+        "seconds": 0,
+      },
+      "task": {
+        "goal": "Park after 8:30 am",
+      },
+      "values": [],
+    },
+  },
+]
+`;
+
+exports[`a run that shows and hides the same list while its page changes by itself > packs the requests the base code packed 1`] = `
+[
+  {
+    "sha256": "0d592ccb5fa38b14cd1f354c37d73c5dc55d91fbb53c7d18252f2ca98fd3e04a",
+    "state": {
+      "page": {
+        "elements": [
+          "viewport (scrolled 0/0px):",
+          "  main",
+          "    heading Today's deals",
+          "    region Featured",
+          "      group 2 of 3",
+          "        heading Free shipping over $50",
+          "        2 link Shop now href=/shipping",
+          "    3 timer Ends in 00:58",
+          "    4 status Saved 1s ago",
+          "    5 div",
+          "      text 4 shoppers viewing",
+          "      6 link See all href=/all",
+          "    7 marquee Free returns on boots",
+          "    8 button Show sizes",
+        ],
+        "title": "Deals",
+        "url": "https://shop.test/deals",
+      },
+      "run": {
+        "actions": [],
+        "actions_without_change_in_a_row": 0,
+        "decisions": 0,
+        "page_state_seen": 1,
+        "pages": [
+          {
+            "url": "shop.test/deals",
+            "visits": 1,
+          },
+        ],
+        "seconds": 0,
+      },
+      "task": {
+        "goal": "Find the sizes of the trail shoe",
+      },
+      "values": [],
+    },
+  },
+  {
+    "sha256": "7e534faa3522be69b083694ba2c1a40b83c1cd1878d3fa36e6b4536805bd2826",
+    "state": {
+      "page": {
+        "elements": [
+          "viewport (scrolled 0/0px):",
+          "  main",
+          "    heading Today's deals",
+          "    region Featured",
+          "      group 3 of 3",
+          "        heading New: waterproof boots",
+          "        2 link Shop now href=/new/boots",
+          "    3 timer Ends in 00:57",
+          "    4 status Saved 2s ago",
+          "    5 div",
+          "      text 3 shoppers viewing",
+          "      6 link See all href=/all",
+          "    7 marquee Free returns on shoes",
+          "    8 button Hide sizes",
+          "    text Sizes 7 to 12",
+        ],
+        "title": "Deals",
+        "url": "https://shop.test/deals",
+      },
+      "recent_actions": "CLICK 8 button Show sizes
+  + group 3 of 3
+  + heading New: waterproof boots
+  + 2 link Shop now
+  + text 3 shoppers viewing
+  + 8 button Hide sizes (6 appeared in all)",
+      "run": {
+        "actions": [
+          {
+            "action": "CLICK button Show sizes",
+            "changed_page": 1,
+            "times": 1,
+          },
+        ],
+        "actions_without_change_in_a_row": 0,
+        "decisions": 1,
+        "page_state_seen": 1,
+        "pages": [
+          {
+            "url": "shop.test/deals",
+            "visits": 1,
+          },
+        ],
+        "seconds": 0,
+      },
+      "task": {
+        "goal": "Find the sizes of the trail shoe",
+      },
+      "values": [],
+    },
+  },
+  {
+    "sha256": "423b423d26c3c14801b9b9526374954fa16ca260b359dd7db4bfad95c914f1e1",
+    "state": {
+      "page": {
+        "elements": [
+          "viewport (scrolled 0/0px):",
+          "  main",
+          "    heading Today's deals",
+          "    region Featured",
+          "      group 1 of 3",
+          "        heading Save 20% on trail shoes",
+          "        2 link Shop now href=/sale/trail",
+          "    3 timer Ends in 00:56",
+          "    4 status Saved 3s ago",
+          "    5 div",
+          "      text 4 shoppers viewing",
+          "      6 link See all href=/all",
+          "    7 marquee Free returns on boots",
+          "    8 button Show sizes",
+        ],
+        "title": "Deals",
+        "url": "https://shop.test/deals",
+      },
+      "recent_actions": "CLICK 8 button Show sizes
+  + group 3 of 3
+  + heading New: waterproof boots
+  + 2 link Shop now
+  + text 3 shoppers viewing
+  + 8 button Hide sizes (6 appeared in all)
+CLICK 8 button Hide sizes
+  + group 1 of 3
+  + heading Save 20% on trail shoes
+  + 2 link Shop now
+  + text 4 shoppers viewing
+  + 8 button Show sizes",
+      "run": {
+        "actions": [
+          {
+            "action": "CLICK button Show sizes",
+            "changed_page": 1,
+            "times": 1,
+          },
+          {
+            "action": "CLICK button Hide sizes",
+            "changed_page": 1,
+            "times": 1,
+          },
+        ],
+        "actions_without_change_in_a_row": 0,
+        "decisions": 2,
+        "page_state_seen": 1,
+        "pages": [
+          {
+            "url": "shop.test/deals",
+            "visits": 1,
+          },
+        ],
+        "seconds": 0,
+      },
+      "task": {
+        "goal": "Find the sizes of the trail shoe",
+      },
+      "values": [],
+    },
+  },
+  {
+    "sha256": "15d0cc16aa6bcc4137ef47f0418e6adc84e71e2a41328effb71f0fbc9fca5174",
+    "state": {
+      "page": {
+        "elements": [
+          "viewport (scrolled 0/0px):",
+          "  main",
+          "    heading Today's deals",
+          "    region Featured",
+          "      group 2 of 3",
+          "        heading Free shipping over $50",
+          "        2 link Shop now href=/shipping",
+          "    3 timer Ends in 00:55",
+          "    4 status Saved 4s ago",
+          "    5 div",
+          "      text 3 shoppers viewing",
+          "      6 link See all href=/all",
+          "    7 marquee Free returns on shoes",
+          "    8 button Hide sizes",
+          "    text Sizes 7 to 12",
+        ],
+        "title": "Deals",
+        "url": "https://shop.test/deals",
+      },
+      "recent_actions": "CLICK 8 button Show sizes
+  + group 3 of 3
+  + heading New: waterproof boots
+  + 2 link Shop now
+  + text 3 shoppers viewing
+  + 8 button Hide sizes (6 appeared in all)
+CLICK 8 button Hide sizes
+  + group 1 of 3
+  + heading Save 20% on trail shoes
+  + 2 link Shop now
+  + text 4 shoppers viewing
+  + 8 button Show sizes
+CLICK 8 button Show sizes
+  + group 2 of 3
+  + heading Free shipping over $50
+  + 2 link Shop now
+  + text 3 shoppers viewing
+  + 8 button Hide sizes (6 appeared in all)",
+      "run": {
+        "actions": [
+          {
+            "action": "CLICK button Show sizes",
+            "changed_page": 2,
+            "times": 2,
+          },
+          {
+            "action": "CLICK button Hide sizes",
+            "changed_page": 1,
+            "times": 1,
+          },
+        ],
+        "actions_without_change_in_a_row": 0,
+        "decisions": 3,
+        "page_state_seen": 1,
+        "pages": [
+          {
+            "url": "shop.test/deals",
+            "visits": 1,
+          },
+        ],
+        "seconds": 0,
+      },
+      "task": {
+        "goal": "Find the sizes of the trail shoe",
+      },
+      "values": [],
+    },
+  },
+  {
+    "sha256": "938a21048abc406023626193ed27708617b6233b7f39f3bc1d75a6161d00a643",
+    "state": {
+      "page": {
+        "elements": [
+          "viewport (scrolled 0/0px):",
+          "  main",
+          "    heading Today's deals",
+          "    region Featured",
+          "      group 3 of 3",
+          "        heading New: waterproof boots",
+          "        2 link Shop now href=/new/boots",
+          "    3 timer Ends in 00:54",
+          "    4 status Saved 5s ago",
+          "    5 div",
+          "      text 4 shoppers viewing",
+          "      6 link See all href=/all",
+          "    7 marquee Free returns on boots",
+          "    8 button Show sizes",
+        ],
+        "title": "Deals",
+        "url": "https://shop.test/deals",
+      },
+      "recent_actions": "CLICK 8 button Show sizes
+  + group 3 of 3
+  + heading New: waterproof boots
+  + 2 link Shop now
+  + text 3 shoppers viewing
+  + 8 button Hide sizes (6 appeared in all)
+CLICK 8 button Hide sizes
+  + group 1 of 3
+  + heading Save 20% on trail shoes
+  + 2 link Shop now
+  + text 4 shoppers viewing
+  + 8 button Show sizes
+CLICK 8 button Show sizes
+  + group 2 of 3
+  + heading Free shipping over $50
+  + 2 link Shop now
+  + text 3 shoppers viewing
+  + 8 button Hide sizes (6 appeared in all)
+CLICK 8 button Hide sizes
+  + group 3 of 3
+  + heading New: waterproof boots
+  + 2 link Shop now
+  + text 4 shoppers viewing
+  + 8 button Show sizes",
+      "run": {
+        "actions": [
+          {
+            "action": "CLICK button Show sizes",
+            "changed_page": 2,
+            "times": 2,
+          },
+          {
+            "action": "CLICK button Hide sizes",
+            "changed_page": 2,
+            "times": 2,
+          },
+        ],
+        "actions_without_change_in_a_row": 0,
+        "decisions": 4,
+        "page_state_seen": 1,
+        "pages": [
+          {
+            "url": "shop.test/deals",
+            "visits": 1,
+          },
+        ],
+        "seconds": 0,
+      },
+      "task": {
+        "goal": "Find the sizes of the trail shoe",
+      },
+      "values": [],
+    },
+  },
+  {
+    "sha256": "d6b1d9206c7c25804bba1a56285d7708b553af980bdd4f83f59a203ef099badb",
+    "state": {
+      "page": {
+        "elements": [
+          "viewport (scrolled 0/0px):",
+          "  main",
+          "    heading Today's deals",
+          "    region Featured",
+          "      group 1 of 3",
+          "        heading Save 20% on trail shoes",
+          "        2 link Shop now href=/sale/trail",
+          "    3 timer Ends in 00:53",
+          "    4 status Saved 6s ago",
+          "    5 div",
+          "      text 3 shoppers viewing",
+          "      6 link See all href=/all",
+          "    7 marquee Free returns on shoes",
+          "    8 button Hide sizes",
+          "    text Sizes 7 to 12",
+        ],
+        "title": "Deals",
+        "url": "https://shop.test/deals",
+      },
+      "recent_actions": "CLICK 8 button Show sizes
+  + group 3 of 3
+  + heading New: waterproof boots
+  + 2 link Shop now
+  + text 3 shoppers viewing
+  + 8 button Hide sizes (6 appeared in all)
+CLICK 8 button Hide sizes
+  + group 1 of 3
+  + heading Save 20% on trail shoes
+  + 2 link Shop now
+  + text 4 shoppers viewing
+  + 8 button Show sizes
+CLICK 8 button Show sizes
+  + group 2 of 3
+  + heading Free shipping over $50
+  + 2 link Shop now
+  + text 3 shoppers viewing
+  + 8 button Hide sizes (6 appeared in all)
+CLICK 8 button Hide sizes
+  + group 3 of 3
+  + heading New: waterproof boots
+  + 2 link Shop now
+  + text 4 shoppers viewing
+  + 8 button Show sizes
+CLICK 8 button Show sizes
+  + group 1 of 3
+  + heading Save 20% on trail shoes
+  + 2 link Shop now
+  + text 3 shoppers viewing
+  + 8 button Hide sizes (6 appeared in all)",
+      "run": {
+        "actions": [
+          {
+            "action": "CLICK button Show sizes",
+            "changed_page": 3,
+            "times": 3,
+          },
+          {
+            "action": "CLICK button Hide sizes",
+            "changed_page": 2,
+            "times": 2,
+          },
+        ],
+        "actions_without_change_in_a_row": 0,
+        "decisions": 5,
+        "page_state_seen": 1,
+        "pages": [
+          {
+            "url": "shop.test/deals",
+            "visits": 1,
+          },
+        ],
+        "seconds": 0,
+      },
+      "task": {
+        "goal": "Find the sizes of the trail shoe",
+      },
+      "values": [],
+    },
+  },
+]
+`;
+
+exports[`a run that works through a list, an item at a time > packs the requests the base code packed 1`] = `
+[
+  {
+    "sha256": "7bda647cf7e0d9c1194ad9ab3341d961b4b4835c535bac17061a75b40f4639b3",
+    "state": {
+      "page": {
+        "elements": [
+          "viewport (scrolled 0/0px):",
+          "  main",
+          "    heading 4 results",
+          "    2 link Trail runner href=/item/1",
+          "    3 link Road racer href=/item/2",
+          "    4 link Hiking boot href=/item/3",
+          "    5 link Court classic href=/item/4",
+        ],
+        "title": "Results",
+        "url": "https://shop.test/results",
+      },
+      "run": {
+        "actions": [],
+        "actions_without_change_in_a_row": 0,
+        "decisions": 0,
+        "page_state_seen": 1,
+        "pages": [
+          {
+            "url": "shop.test/results",
+            "visits": 1,
+          },
+        ],
+        "seconds": 0,
+      },
+      "task": {
+        "goal": "Find the cheapest shoe",
+      },
+      "values": [],
+    },
+  },
+  {
+    "sha256": "6b6b17f3241eab3a52e4fc68a8a0d1a041b175eddffecc5640a010bd0704b395",
+    "state": {
+      "page": {
+        "elements": [
+          "viewport (scrolled 0/0px):",
+          "  main",
+          "    heading Trail runner",
+          "    text Price $40",
+          "    2 button Add to cart",
+        ],
+        "title": "Trail runner",
+        "url": "https://shop.test/item/1",
+      },
+      "recent_actions": "CLICK link Trail runner
+  page → shop.test/item/1",
+      "run": {
+        "actions": [
+          {
+            "action": "CLICK link Trail runner",
+            "changed_page": 1,
+            "times": 1,
+          },
+        ],
+        "actions_without_change_in_a_row": 0,
+        "decisions": 1,
+        "page_state_seen": 1,
+        "pages": [
+          {
+            "url": "shop.test/results",
+            "visits": 1,
+          },
+          {
+            "url": "shop.test/item/1",
+            "visits": 1,
+          },
+        ],
+        "seconds": 0,
+      },
+      "task": {
+        "goal": "Find the cheapest shoe",
+      },
+      "values": [],
+    },
+  },
+  {
+    "sha256": "8e2cbb9e51216998e774fb30e20a7030e6dde086801969e2414f48a2e1181134",
+    "state": {
+      "page": {
+        "elements": [
+          "viewport (scrolled 0/0px):",
+          "  main",
+          "    heading 4 results",
+          "    2 link Trail runner href=/item/1 · tried here 1 times: page → shop.test/item/1",
+          "    3 link Road racer href=/item/2",
+          "    4 link Hiking boot href=/item/3",
+          "    5 link Court classic href=/item/4",
+        ],
+        "title": "Results",
+        "url": "https://shop.test/results",
+      },
+      "recent_actions": "CLICK 2 link Trail runner
+  page → shop.test/item/1
+BACK
+  page → shop.test/results",
+      "run": {
+        "actions": [
+          {
+            "action": "CLICK link Trail runner",
+            "changed_page": 1,
+            "times": 1,
+          },
+          {
+            "action": "BACK",
+            "changed_page": 1,
+            "times": 1,
+          },
+        ],
+        "actions_without_change_in_a_row": 0,
+        "decisions": 2,
+        "page_state_seen": 2,
+        "pages": [
+          {
+            "url": "shop.test/results",
+            "visits": 2,
+          },
+          {
+            "url": "shop.test/item/1",
+            "visits": 1,
+          },
+        ],
+        "seconds": 0,
+      },
+      "task": {
+        "goal": "Find the cheapest shoe",
+      },
+      "values": [],
+    },
+  },
+  {
+    "sha256": "e4b8242fa5b77ef86997555790b61dd10bb247baa9e380695ff7665a43d77005",
+    "state": {
+      "page": {
+        "elements": [
+          "viewport (scrolled 0/0px):",
+          "  main",
+          "    heading Road racer",
+          "    text Price $41",
+          "    2 button Add to cart",
+        ],
+        "title": "Road racer",
+        "url": "https://shop.test/item/2",
+      },
+      "recent_actions": "CLICK link Trail runner
+  page → shop.test/item/1
+BACK
+  page → shop.test/results
+CLICK link Road racer
+  page → shop.test/item/2",
+      "run": {
+        "actions": [
+          {
+            "action": "CLICK link Trail runner",
+            "changed_page": 1,
+            "times": 1,
+          },
+          {
+            "action": "BACK",
+            "changed_page": 1,
+            "times": 1,
+          },
+          {
+            "action": "CLICK link Road racer",
+            "changed_page": 1,
+            "times": 1,
+          },
+        ],
+        "actions_without_change_in_a_row": 0,
+        "decisions": 3,
+        "page_state_seen": 1,
+        "pages": [
+          {
+            "url": "shop.test/results",
+            "visits": 2,
+          },
+          {
+            "url": "shop.test/item/1",
+            "visits": 1,
+          },
+          {
+            "url": "shop.test/item/2",
+            "visits": 1,
+          },
+        ],
+        "seconds": 0,
+      },
+      "task": {
+        "goal": "Find the cheapest shoe",
+      },
+      "values": [],
+    },
+  },
+  {
+    "sha256": "015ef772db0d5deda5112578e7034b2a50b956fdd4ced17836e6d6e465ff2311",
+    "state": {
+      "page": {
+        "elements": [
+          "viewport (scrolled 0/0px):",
+          "  main",
+          "    heading 4 results",
+          "    2 link Trail runner href=/item/1 · tried here 1 times: page → shop.test/item/1",
+          "    3 link Road racer href=/item/2 · tried here 1 times: page → shop.test/item/2",
+          "    4 link Hiking boot href=/item/3",
+          "    5 link Court classic href=/item/4",
+        ],
+        "title": "Results",
+        "url": "https://shop.test/results",
+      },
+      "recent_actions": "CLICK 2 link Trail runner
+  page → shop.test/item/1
+BACK
+  page → shop.test/results
+CLICK 3 link Road racer
+  page → shop.test/item/2
+BACK
+  page → shop.test/results",
+      "run": {
+        "actions": [
+          {
+            "action": "CLICK link Trail runner",
+            "changed_page": 1,
+            "times": 1,
+          },
+          {
+            "action": "BACK",
+            "changed_page": 2,
+            "times": 2,
+          },
+          {
+            "action": "CLICK link Road racer",
+            "changed_page": 1,
+            "times": 1,
+          },
+        ],
+        "actions_without_change_in_a_row": 0,
+        "decisions": 4,
+        "page_state_seen": 3,
+        "pages": [
+          {
+            "url": "shop.test/results",
+            "visits": 3,
+          },
+          {
+            "url": "shop.test/item/1",
+            "visits": 1,
+          },
+          {
+            "url": "shop.test/item/2",
+            "visits": 1,
+          },
+        ],
+        "seconds": 0,
+      },
+      "task": {
+        "goal": "Find the cheapest shoe",
+      },
+      "values": [],
+    },
+  },
+  {
+    "sha256": "9f933e9d54c69ca8d5d2b78dd11d90e1a76f45469465aad0d92bcec455c9c69e",
+    "state": {
+      "page": {
+        "elements": [
+          "viewport (scrolled 0/0px):",
+          "  main",
+          "    heading Hiking boot",
+          "    text Price $42",
+          "    2 button Add to cart",
+        ],
+        "title": "Hiking boot",
+        "url": "https://shop.test/item/3",
+      },
+      "recent_actions": "CLICK link Trail runner
+  page → shop.test/item/1
+BACK
+  page → shop.test/results
+CLICK link Road racer
+  page → shop.test/item/2
+BACK
+  page → shop.test/results
+CLICK link Hiking boot
+  page → shop.test/item/3",
+      "run": {
+        "actions": [
+          {
+            "action": "CLICK link Trail runner",
+            "changed_page": 1,
+            "times": 1,
+          },
+          {
+            "action": "BACK",
+            "changed_page": 2,
+            "times": 2,
+          },
+          {
+            "action": "CLICK link Road racer",
+            "changed_page": 1,
+            "times": 1,
+          },
+          {
+            "action": "CLICK link Hiking boot",
+            "changed_page": 1,
+            "times": 1,
+          },
+        ],
+        "actions_without_change_in_a_row": 0,
+        "decisions": 5,
+        "page_state_seen": 1,
+        "pages": [
+          {
+            "url": "shop.test/results",
+            "visits": 3,
+          },
+          {
+            "url": "shop.test/item/1",
+            "visits": 1,
+          },
+          {
+            "url": "shop.test/item/2",
+            "visits": 1,
+          },
+          {
+            "url": "shop.test/item/3",
+            "visits": 1,
+          },
+        ],
+        "seconds": 0,
+      },
+      "task": {
+        "goal": "Find the cheapest shoe",
+      },
+      "values": [],
+    },
+  },
+  {
+    "sha256": "ffac52770f1d053fc2d68f8dd41e86f10e44e2a9a0c4d19037db2e3b8caafa64",
+    "state": {
+      "page": {
+        "elements": [
+          "viewport (scrolled 0/0px):",
+          "  main",
+          "    heading 4 results",
+          "    2 link Trail runner href=/item/1 · tried here 1 times: page → shop.test/item/1",
+          "    3 link Road racer href=/item/2 · tried here 1 times: page → shop.test/item/2",
+          "    4 link Hiking boot href=/item/3 · tried here 1 times: page → shop.test/item/3",
+          "    5 link Court classic href=/item/4",
+        ],
+        "title": "Results",
+        "url": "https://shop.test/results",
+      },
+      "recent_actions": "CLICK 2 link Trail runner
+  page → shop.test/item/1
+BACK
+  page → shop.test/results
+CLICK 3 link Road racer
+  page → shop.test/item/2
+BACK
+  page → shop.test/results
+CLICK 4 link Hiking boot
+  page → shop.test/item/3
+BACK
+  page → shop.test/results",
+      "run": {
+        "actions": [
+          {
+            "action": "CLICK link Trail runner",
+            "changed_page": 1,
+            "times": 1,
+          },
+          {
+            "action": "BACK",
+            "changed_page": 3,
+            "times": 3,
+          },
+          {
+            "action": "CLICK link Road racer",
+            "changed_page": 1,
+            "times": 1,
+          },
+          {
+            "action": "CLICK link Hiking boot",
+            "changed_page": 1,
+            "times": 1,
+          },
+        ],
+        "actions_without_change_in_a_row": 0,
+        "decisions": 6,
+        "page_state_seen": 4,
+        "pages": [
+          {
+            "url": "shop.test/results",
+            "visits": 4,
+          },
+          {
+            "url": "shop.test/item/1",
+            "visits": 1,
+          },
+          {
+            "url": "shop.test/item/2",
+            "visits": 1,
+          },
+          {
+            "url": "shop.test/item/3",
+            "visits": 1,
+          },
+        ],
+        "seconds": 0,
+      },
+      "task": {
+        "goal": "Find the cheapest shoe",
+      },
+      "values": [],
+    },
+  },
+]
+`;
+
+exports[`a run whose click on a link leaves the page as it was > packs the requests the base code packed for a link that works 1`] = `
+[
+  {
+    "sha256": "0cd41d906eb77a849511bb4ae10526f9d4cb1b74e2cd87244fba798345fa603e",
+    "state": {
+      "page": {
+        "elements": [
+          "viewport (scrolled 0/0px):",
+          "  main",
+          "    heading Events",
+          "    2 link Discovery Walk Sat, Nov 21 href=/event-details.htm",
+        ],
+        "title": "Calendar",
+        "url": "https://parks.test/calendar",
+      },
+      "run": {
+        "actions": [],
+        "actions_without_change_in_a_row": 0,
+        "decisions": 0,
+        "page_state_seen": 1,
+        "pages": [
+          {
+            "url": "parks.test/calendar",
+            "visits": 1,
+          },
+        ],
+        "seconds": 0,
+      },
+      "task": {
+        "goal": "Find where the Discovery Walk meets",
+      },
+      "values": [],
+    },
+  },
+  {
+    "sha256": "7b4ca96e8be902db264791da3541f89b08d282fbb6e5f73666bbda1296fd106e",
+    "state": {
+      "page": {
+        "elements": [
+          "viewport (scrolled 0/0px):",
+          "  main",
+          "    heading Discovery Walk",
+          "    text Meet in front of the museum.",
+        ],
+        "title": "Discovery Walk",
+        "url": "https://parks.test/event-details.htm?id=DCA5F797",
+      },
+      "recent_actions": "CLICK link Discovery Walk Sat, Nov 21
+  page → parks.test/event-details.htm?id=DCA5F797",
+      "run": {
+        "actions": [
+          {
+            "action": "CLICK link Discovery Walk Sat, Nov 21",
+            "changed_page": 1,
+            "times": 1,
+          },
+        ],
+        "actions_without_change_in_a_row": 0,
+        "decisions": 1,
+        "page_state_seen": 1,
+        "pages": [
+          {
+            "url": "parks.test/calendar",
+            "visits": 1,
+          },
+          {
+            "url": "parks.test/event-details.htm?id=DCA5F797",
+            "visits": 1,
+          },
+        ],
+        "seconds": 0,
+      },
+      "task": {
+        "goal": "Find where the Discovery Walk meets",
+      },
+      "values": [],
+    },
+  },
+]
+`;

@@ -1,0 +1,18 @@
+{
+  "name": "karpo-browser",
+  "description": "A browser for AI agents: a decision model (System 1) does the steps on the page, your agent (System 2) plans, reads and answers.",
+  "version": "0.1.0",
+  "author": { "name": "Karpo" },
+  "skills": ["./skills/karpo-browser"],
+  "mcpServers": {
+    "karpo-browser": {
+      "command": "npx",
+      "args": ["-y", "karpo-browser", "mcp"],
+      "env": {
+        "SYSTEM1_URL": "${SYSTEM1_URL:-https://openrouter.ai/api/alpha/decisions}",
+        "SYSTEM1_MODEL": "${SYSTEM1_MODEL}",
+        "SYSTEM1_API_KEY": "${SYSTEM1_API_KEY}"
+      }
+    }
+  }
+}

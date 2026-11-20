@@ -1,0 +1,45 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`a page that changes by itself > reads as the base code read it 1`] = `
+[
+  {
+    "lines": [
+      "viewport (scrolled 0/0px):",
+      "  main",
+      "    heading Today's deals",
+      "    region Featured",
+      "      group 1 of 3",
+      "        heading Save 20% on trail shoes",
+      "        2 link Shop now href=/sale/trail",
+      "    3 timer Ends in 00:59",
+      "    4 status Saved 0s ago",
+      "    5 div",
+      "      text 3 shoppers viewing",
+      "      6 link See all href=/all",
+      "    7 marquee Free returns on shoes",
+      "    8 button Show sizes",
+    ],
+    "state": "3d1fb51f9d5b2910",
+  },
+  {
+    "lines": [
+      "viewport (scrolled 0/0px):",
+      "  main",
+      "    heading Today's deals",
+      "    region Featured",
+      "      group 2 of 3",
+      "        heading Free shipping over $50",
+      "        2 link Shop now href=/shipping",
+      "    3 timer Ends in 00:58",
+      "    4 status Saved 1s ago",
+      "    5 div",
+      "      text 4 shoppers viewing",
+      "      6 link See all href=/all",
+      "    7 marquee Free returns on boots",
+      "    8 button Hide sizes",
+      "    text Sizes 7 to 12",
+    ],
+    "state": "c85c446d59dfbc00",
+  },
+]
+`;

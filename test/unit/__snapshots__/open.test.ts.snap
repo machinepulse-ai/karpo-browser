@@ -1,0 +1,36 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`opening an address > packs the request the base code packed, on a page opened at the first try 1`] = `
+{
+  "sha256": "fc0f7079db6a185e5611c6b66807cb823963484562518cb1d17e4be7b04756cd",
+  "state": {
+    "page": {
+      "elements": [
+        "viewport (scrolled 0/0px):",
+        "  main",
+        "    heading Discovery Walk",
+        "    text Meet in front of the museum.",
+      ],
+      "title": "Discovery Walk",
+      "url": "https://parks.test/event",
+    },
+    "run": {
+      "actions": [],
+      "actions_without_change_in_a_row": 0,
+      "decisions": 0,
+      "page_state_seen": 1,
+      "pages": [
+        {
+          "url": "parks.test/event",
+          "visits": 1,
+        },
+      ],
+      "seconds": 0,
+    },
+    "task": {
+      "goal": "Find where the Discovery Walk meets",
+    },
+    "values": [],
+  },
+}
+`;
