@@ -250,6 +250,11 @@ export SYSTEM2_API_KEY=sk-or-...           # SYSTEM2_BASE_URL is OpenRouter's un
 node test/controller/cli.ts --url https://books.toscrape.com/ "Find the price of the book A Light in the Attic"
 ```
 
+`--benchmark` runs the configuration of our published runs: DeepSeek V4.1 Flash on OpenRouter, the provider left to
+OpenRouter's routing, a 450 s deadline, and the options in `test/controller/benchmark.ts` (set `SYSTEM2_MODEL` to use
+another model with those options). [`evals/stagehand`](evals/stagehand/README.md) runs it on Browserbase Benchmark v2
+with Stagehand's eval harness.
+
 ## Development
 
 ```bash
@@ -271,4 +276,6 @@ agents alike), and [CHANGELOG.md](CHANGELOG.md) what changed in each release.
 
 Copyright (c) 2026 MachinePulse Pte. Ltd.
 
-The code in this repository is licensed under the Apache License, Version 2.0 ([LICENSE](LICENSE)).
+The code in this repository is licensed under the Apache License, Version 2.0 ([LICENSE](LICENSE)), except
+[`evals/stagehand/stagehand.patch`](evals/stagehand/stagehand.patch), which is under Stagehand's MIT license
+([LICENSE-stagehand](evals/stagehand/LICENSE-stagehand)).
