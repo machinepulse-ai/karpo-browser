@@ -1,0 +1,1603 @@
+diff --git a/packages/evals/framework/benchHarness.ts b/packages/evals/framework/benchHarness.ts
+index 0b622f3e3..ef6f0b5cb 100644
+--- a/packages/evals/framework/benchHarness.ts
++++ b/packages/evals/framework/benchHarness.ts
+@@ -24,6 +24,12 @@ import { runEveAgent } from "./eveRunner.js";
+ import { EVE_TOOL_SURFACES, prepareEveToolAdapter } from "./eveToolAdapter.js";
+ import { runDeepagentsAgent } from "./deepagentsRunner.js";
+ import { DEEPAGENTS_TOOL_SURFACES, prepareDeepagentsToolAdapter } from "./deepagentsToolAdapter.js";
++import { AGENT_PROGRAM_MODEL, runAgentProgram } from "./karpoBrowserRunner.js";
++import { AGENT_PROGRAM_HARNESS } from "./karpoBrowserSession.js";
++import {
++  AGENT_PROGRAM_TOOL_SURFACES,
++  prepareAgentProgramToolAdapter,
++} from "./karpoBrowserToolAdapter.js";
+ import { runFxAgent } from "./fxRunner.js";
+ import { FX_TOOL_SURFACES, prepareFxToolAdapter } from "./fxToolAdapter.js";
+ import { runCursorAgent } from "./cursorRunner.js";
+@@ -401,6 +407,19 @@ export const geminiCuaHarness = defineExternalHarness({
+   runAgent: runGeminiCuaAgent,
+ });
+ 
++/**
++ * karpo-browser: an external agent program, karpo-browser's adapter, run as
++ * `$EVAL_AGENT_BIN` (no arguments). It reads its model settings from its own
++ * environment; the model id is only a label.
++ */
++export const karpoBrowserHarness = defineExternalHarness({
++  harness: AGENT_PROGRAM_HARNESS,
++  supportedToolSurfaces: AGENT_PROGRAM_TOOL_SURFACES,
++  defaultModels: [AGENT_PROGRAM_MODEL],
++  prepareToolAdapter: prepareAgentProgramToolAdapter,
++  runAgent: runAgentProgram,
++});
++
+ const harnessRegistry = new Map<Harness, BenchHarness>([
+   ["stagehand", stagehandHarness],
+   ["claude_code", claudeCodeHarness],
+@@ -413,6 +432,7 @@ const harnessRegistry = new Map<Harness, BenchHarness>([
+   ["cursor", cursorHarness],
+   ["claude_cua", claudeCuaHarness],
+   ["gemini_cua", geminiCuaHarness],
++  [AGENT_PROGRAM_HARNESS, karpoBrowserHarness],
+ ]);
+ 
+ export function registerBenchHarness(harness: BenchHarness): () => void {
+diff --git a/packages/evals/framework/karpoBrowserRunner.ts b/packages/evals/framework/karpoBrowserRunner.ts
+new file mode 100644
+index 000000000..7f83e856d
+--- /dev/null
++++ b/packages/evals/framework/karpoBrowserRunner.ts
+@@ -0,0 +1,254 @@
++/**
++ * karpo-browser as an external harness (`karpo_browser`): the agent program
++ * EVAL_AGENT_BIN names (karpo-browser's adapter, an absolute path) stands in
++ * for the Deep Agents runner and speaks its protocol (see
++ * karpoBrowserSession.ts), so its events map to a trajectory exactly as Deep
++ * Agents' do. The program is started with no arguments, in the eval process's
++ * environment plus, when the row's browser is a Browserbase session, that
++ * session's id in BROWSERBASE_SESSION_ID: the program drives the row's browser
++ * over a CDP connection of its own, as the facade does not tell agents its
++ * session, and calls the `stagehand_facade` tools through the MCP servers it is
++ * given.
++ *
++ * The program reads its own model settings from its environment; the row's
++ * model is only a label, so it says nothing about the models called or their
++ * price.
++ *
++ * The agent keeps its execution records in the row's working directory; once
++ * the row's trajectory is written, they are copied into it, before the working
++ * directory is removed.
++ *
++ * Adapted from runDeepagentsAgent (packages/evals/framework/deepagentsRunner.ts
++ * at c8e096cb), Copyright (c) 2024 Browserbase Inc., MIT License (see LICENSE
++ * at the repository root).
++ */
++import fsp from "node:fs/promises";
++import path from "node:path";
++import {
++  buildDeepagentsTranscript,
++  stringifyError,
++  type DeepagentsProcessSpawner,
++} from "@browserbasehq/stagehand-integrations-deepagents-sdk";
++import type { AvailableModel } from "stagehand-v3";
++import { EvalsError } from "../errors.js";
++import type { EvalLogger } from "../logger.js";
++import type { ExternalHarnessTaskPlan } from "./externalHarnessPlan.js";
++import { deepagentsAdapter } from "./harnesses/deepagentsAdapter.js";
++import {
++  EVAL_RESULT_SCHEMA,
++  readResultContract,
++  runExternalHarnessTask,
++} from "./harnesses/externalRunner.js";
++import { AGENT_PROGRAM_HARNESS, runAgentProgramSession } from "./karpoBrowserSession.js";
++import type { PreparedAgentProgramToolAdapter } from "./karpoBrowserToolAdapter.js";
++import { resolveStepBudget } from "./stepBudget.js";
++import type { TaskResult } from "./types.js";
++import type { ExternalHarnessVerifierConfig } from "./verifierAdapter.js";
++
++/** Absolute path of the agent program. */
++export const AGENT_BIN_ENV = "EVAL_AGENT_BIN";
++/** The model id the harness's rows carry: a label only, the agent's models being its own. */
++export const AGENT_PROGRAM_MODEL = "karpo-browser/controller" as AvailableModel;
++/**
++ * Where the program finds the id of the row's Browserbase session, and the
++ * provider of a browser that is one.
++ */
++const BROWSERBASE_SESSION_ENV = "BROWSERBASE_SESSION_ID";
++const BROWSERBASE_PROVIDER = "browserbase";
++
++/** Wall-clock limit of a run, in seconds; the Deep Agents runner's own limit by default. */
++const RUN_SECONDS_ENV = "EVAL_AGENT_RUN_SECONDS";
++const DEFAULT_RUN_SECONDS = 2_400;
++/**
++ * The tool-call budget, when set for the harness; else AGENT_EVAL_MAX_STEPS, the
++ * dataset's budget or the harness's default (see resolveStepBudget).
++ */
++const MAX_STEPS_ENV = "EVAL_AGENT_MAX_STEPS";
++/**
++ * Where the agent's execution records go: a directory of the row's working
++ * directory, then one of the row's trajectory directory.
++ */
++const AGENT_RECORDS_DIR = "agent-records";
++const TRAJECTORY_AGENT_DIR = "agent";
++
++/**
++ * How the task is run: the report's contract unless one is set, and the one asking for
++ * it as JSON; the unit of the step budget; the system prompt passed as the agent's own;
++ * and the status of a session that failed.
++ */
++const DEFAULT_RESULT_CONTRACT = "marker";
++const STRUCTURED_OUTPUT_CONTRACT = "structured_output";
++const STEP_BUDGET_UNIT = "tool_calls";
++const SYSTEM_PROMPT_MODE = "native";
++const SDK_ERROR_STATUS = "sdk_error";
++
++export interface AgentProgramRunnerInput {
++  plan: ExternalHarnessTaskPlan;
++  model: AvailableModel;
++  logger: EvalLogger;
++  toolAdapter: PreparedAgentProgramToolAdapter;
++  signal?: AbortSignal;
++  spawn?: DeepagentsProcessSpawner;
++  verifier?: ExternalHarnessVerifierConfig;
++  env?: NodeJS.ProcessEnv;
++}
++
++export async function runAgentProgram({
++  plan,
++  model,
++  logger,
++  toolAdapter,
++  signal,
++  spawn,
++  verifier,
++  env = process.env,
++}: AgentProgramRunnerInput): Promise<TaskResult> {
++  const binary = env[AGENT_BIN_ENV]?.trim();
++  if (!binary || !path.isAbsolute(binary)) {
++    throw new EvalsError(`${AGENT_BIN_ENV} must be the absolute path of the agent program.`);
++  }
++  const resultContract = readResultContract(DEFAULT_RESULT_CONTRACT, env);
++  const maxToolSteps = resolveStepBudget({
++    harnessEnvKey: MAX_STEPS_ENV,
++    dataset: plan.dataset,
++    harnessDefault: 50,
++    env,
++  });
++  const runSeconds = readPositiveInt(env[RUN_SECONDS_ENV]) ?? DEFAULT_RUN_SECONDS;
++  const recordsDir = path.join(toolAdapter.cwd, AGENT_RECORDS_DIR);
++  const result = await runExternalHarnessTask({
++    harness: AGENT_PROGRAM_HARNESS,
++    plan,
++    model,
++    logger,
++    toolAdapter,
++    verifier,
++    resultContract,
++    fallbackErrorMessage: "the agent program did not report success",
++    stepBudget: maxToolSteps,
++    stepBudgetUnit: STEP_BUDGET_UNIT,
++    configuration: { runSeconds },
++    systemPromptMode: SYSTEM_PROMPT_MODE,
++    runSession: async (prompt, systemPrompt) => {
++      const sessionResult = await runAgentProgramSession({
++        prompt,
++        model,
++        logger,
++        signal,
++        spawn,
++        session: {
++          binary,
++          cwd: toolAdapter.cwd,
++          env: agentEnv(toolAdapter),
++          mcpServers: toolAdapter.mcpServers,
++          systemPrompt,
++          maxToolSteps,
++          ...(resultContract === STRUCTURED_OUTPUT_CONTRACT && {
++            resultSchema: EVAL_RESULT_SCHEMA,
++          }),
++          instruction: plan.instruction,
++          startUrl: plan.startUrl,
++          runSeconds,
++          recordsDir,
++        },
++        onToolResult: (_name: string, server?: string) => {
++          if (server && toolAdapter.recordObservation) toolAdapter.recordObservation();
++        },
++      });
++      const usage = sessionResult.tokenUsage;
++      return {
++        raw: sessionResult,
++        resultText: sessionResult.finalMessage,
++        transcriptText: buildDeepagentsTranscript(sessionResult.events),
++        iterationError: sessionResult.iterationError,
++        status: sessionResult.status,
++        stopReason:
++          sessionResult.stopReason ||
++          (sessionResult.status === SDK_ERROR_STATUS
++            ? stringifyError(sessionResult.iterationError) || undefined
++            : undefined),
++        usage: {
++          reported: usage.reported,
++          inputTokens: usage.inputTokens,
++          outputTokens: usage.outputTokens,
++          cachedInputTokens: usage.cacheReadInputTokens,
++          reasoningOutputTokens: usage.reasoningOutputTokens,
++          totalTokens: usage.totalTokens,
++        },
++        metrics: {},
++      };
++    },
++    toTrajectory: (
++      { raw, parsed, finalObservation, stepObservations, observedToolName, status },
++      taskSpec,
++    ) =>
++      deepagentsAdapter.fromHarnessResult(
++        {
++          events: raw.events,
++          ...(finalObservation && { finalObservation }),
++          ...(stepObservations?.length && { stepObservations }),
++          ...(observedToolName && { observedToolName }),
++          finalAnswer: parsed.finalAnswer ?? raw.finalMessage,
++          status,
++          usage: {
++            input_tokens: raw.tokenUsage.inputTokens,
++            output_tokens: raw.tokenUsage.outputTokens,
++            reasoning_tokens: raw.tokenUsage.reasoningOutputTokens,
++            cached_input_tokens: raw.tokenUsage.cacheReadInputTokens,
++          },
++        },
++        taskSpec,
++      ),
++  });
++  await keepAgentRecords(recordsDir, result.trajectoryDir, logger);
++  return result;
++}
++
++/**
++ * The program's environment: the tool adapter's (the eval process's own) and,
++ * when the row's browser is a Browserbase session, its id in
++ * BROWSERBASE_SESSION_ID, over any value inherited.
++ */
++function agentEnv(toolAdapter: PreparedAgentProgramToolAdapter): Record<string, string> {
++  const { provider, sessionId } = toolAdapter.browserSession;
++  return provider === BROWSERBASE_PROVIDER && sessionId
++    ? { ...toolAdapter.env, [BROWSERBASE_SESSION_ENV]: sessionId }
++    : toolAdapter.env;
++}
++
++/**
++ * Copies the agent's execution records into the row's trajectory directory,
++ * when one was written: a result names one even when trajectories are not
++ * persisted, though it is never made then. Best effort: a copy that fails is
++ * logged, and the row stands.
++ */
++async function keepAgentRecords(
++  recordsDir: string,
++  trajectoryDir: unknown,
++  logger: EvalLogger,
++): Promise<void> {
++  if (typeof trajectoryDir !== "string") return;
++  if (!(await isDirectory(trajectoryDir)) || !(await isDirectory(recordsDir))) return;
++  try {
++    await fsp.cp(recordsDir, path.join(trajectoryDir, TRAJECTORY_AGENT_DIR), { recursive: true });
++  } catch (error) {
++    logger.warn({
++      category: AGENT_PROGRAM_HARNESS,
++      message: `could not keep the agent's execution records: ${stringifyError(error)}`,
++      level: 1,
++    });
++  }
++}
++
++async function isDirectory(dir: string): Promise<boolean> {
++  try {
++    return (await fsp.stat(dir)).isDirectory();
++  } catch {
++    return false;
++  }
++}
++
++function readPositiveInt(raw: string | undefined): number | undefined {
++  const parsed = Number(raw);
++  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
++}
+diff --git a/packages/evals/framework/karpoBrowserSession.ts b/packages/evals/framework/karpoBrowserSession.ts
+new file mode 100644
+index 000000000..4185334f9
+--- /dev/null
++++ b/packages/evals/framework/karpoBrowserSession.ts
+@@ -0,0 +1,415 @@
++/**
++ * One agent program process per task, for the `karpo_browser` harness. The
++ * program (karpo-browser's adapter, named by EVAL_AGENT_BIN) speaks the Deep
++ * Agents runner's protocol (packages/integrations/deepagents/runner/run_eval.py):
++ * one JSON object on stdin, then one JSON event per stdout line in the same
++ * shapes (assistant, tool_call, tool_result, error, final, usage).
++ *
++ * Adapted from runDeepagentsSession
++ * (packages/integrations/deepagents-sdk/src/session.ts at c8e096cb),
++ * Copyright (c) 2024 Browserbase Inc., MIT License (see LICENSE at the
++ * repository root). That session's command and stdin are fixed to the Deep
++ * Agents runner; this copy changes only:
++ * - the command: the agent program, started with no arguments, in place of
++ *   `uv run … run_eval.py`, with the environment it is given;
++ * - stdin: four more fields, the plan's `instruction` and `start_url` and the
++ *   run's time limit `run_seconds` (the agent prefers them to reading the task
++ *   back out of the prompt), and `records_dir`, where the agent keeps its
++ *   execution records; the model label as given, `reasoning_summary` null and
++ *   `recursion_limit` the tool-call budget;
++ * - stop kinds: `tool_step_budget` is the only one a later error cannot
++ *   overwrite, as the agent never reports `recursion_limit`;
++ * - the kill grace and the stream drain, fixed at Deep Agents' default 5 s;
++ *   its own log category and messages;
++ * - the protocol's words (the input's fields, the events' types, kinds and
++ *   fields, the signals) named as module constants.
++ */
++import { createInterface } from "node:readline";
++import {
++  clip,
++  extractDeepagentsTokenUsage,
++  isRecord,
++  resolveDeepagentsStatus,
++  spawnDeepagentsProcess,
++  stringifyError,
++  summarizeDeepagentsEvent,
++  type DeepagentsEvent,
++  type DeepagentsMcpServerConfig,
++  type DeepagentsProcessHandle,
++  type DeepagentsProcessSpawner,
++  type DeepagentsSessionResult,
++} from "@browserbasehq/stagehand-integrations-deepagents-sdk";
++import {
++  harnessEventLogLevel,
++  sanitizeErrorMessage,
++  type HarnessLogger,
++} from "@browserbasehq/stagehand-integrations/harness";
++
++/** The harness's name, which its runs are logged under, as Deep Agents' are under theirs. */
++export const AGENT_PROGRAM_HARNESS = "karpo_browser";
++const LOG_CATEGORY = AGENT_PROGRAM_HARNESS;
++/** The type a logged auxiliary value of text is given. */
++export const STRING_AUXILIARY = "string";
++
++/** How long a stopped agent has to report and exit before it is killed, as Deep Agents has. */
++const KILL_GRACE_MS = 5_000;
++/** How the agent is stopped, then killed. */
++const STOP_SIGNAL = "SIGTERM";
++const KILL_SIGNAL = "SIGKILL";
++/** The events of an abort signal and of a stream that fails. */
++const ABORT_EVENT = "abort";
++const STREAM_ERROR_EVENT = "error";
++
++/**
++ * The fields of the task on the agent's stdin: the Deep Agents runner's, then the
++ * agent's own.
++ */
++const PROMPT_FIELD = "prompt";
++const SYSTEM_PROMPT_FIELD = "system_prompt";
++const MODEL_FIELD = "model";
++const REASONING_SUMMARY_FIELD = "reasoning_summary";
++const MCP_SERVERS_FIELD = "mcp_servers";
++const RECURSION_LIMIT_FIELD = "recursion_limit";
++const MAX_TOOL_STEPS_FIELD = "max_tool_steps";
++const RESULT_SCHEMA_FIELD = "result_schema";
++const INSTRUCTION_FIELD = "instruction";
++const START_URL_FIELD = "start_url";
++const RUN_SECONDS_FIELD = "run_seconds";
++const RECORDS_DIR_FIELD = "records_dir";
++
++/**
++ * The agent's stdout events: the types the session reads, the kinds of error it
++ * tells apart (a budget stop, and an error of no kind), and the fields it reads;
++ * what an event of no type is logged as; and the fields whose text it redacts
++ * wherever they are.
++ */
++const ASSISTANT_EVENT = "assistant";
++const TOOL_RESULT_EVENT = "tool_result";
++const ERROR_EVENT = "error";
++const FINAL_EVENT = "final";
++const USAGE_EVENT = "usage";
++const TOOL_STEP_BUDGET_KIND = "tool_step_budget";
++const EXCEPTION_KIND = "exception";
++const TYPE_FIELD = "type";
++const TEXT_FIELD = "text";
++const KIND_FIELD = "kind";
++const MESSAGE_FIELD = "message";
++const NAME_FIELD = "name";
++const SERVER_FIELD = "server";
++const OK_FIELD = "ok";
++const ERROR_FIELD = "error";
++const DETAIL_FIELD = "detail";
++const UNKNOWN_EVENT = "unknown";
++const SENSITIVE_TEXT_FIELDS: ReadonlySet<string> = new Set([
++  ERROR_FIELD,
++  MESSAGE_FIELD,
++  DETAIL_FIELD,
++]);
++
++export type AgentProgramSessionConfig = {
++  /** Absolute path of the agent program. */
++  binary: string;
++  cwd?: string;
++  env: Record<string, string>;
++  mcpServers: Record<string, DeepagentsMcpServerConfig>;
++  systemPrompt: string;
++  /** The tool-call budget; the agent stops before it would exceed it. */
++  maxToolSteps: number;
++  /** JSON schema of the report when the structured-output contract is on. */
++  resultSchema?: Record<string, unknown>;
++  instruction: string;
++  startUrl: string;
++  /** The run's wall-clock limit in seconds. */
++  runSeconds: number;
++  /**
++   * Absolute path of the directory the agent keeps its execution records in;
++   * without one, it keeps them only while it runs.
++   */
++  recordsDir?: string;
++};
++
++export async function runAgentProgramSession(input: {
++  prompt: string;
++  model: string;
++  logger: HarnessLogger;
++  session: AgentProgramSessionConfig;
++  signal?: AbortSignal;
++  spawn?: DeepagentsProcessSpawner;
++  onToolResult?: (toolName: string, server?: string) => void | Promise<void>;
++}): Promise<DeepagentsSessionResult> {
++  const { session } = input;
++  const events: DeepagentsEvent[] = [];
++  let finalMessage = "";
++  let stopReason: string | undefined;
++  let errorKind: string | undefined;
++  let tokenUsage = extractDeepagentsTokenUsage(undefined);
++  let iterationError: string | undefined;
++  let exitCode: number | null = null;
++  let exitSignal: NodeJS.Signals | null = null;
++  let sawFinal = false;
++  let sawUsage = false;
++  let handle: DeepagentsProcessHandle | undefined;
++  let processExited = false;
++  let killTimer: ReturnType<typeof setTimeout> | undefined;
++  let stdoutTask: Promise<void> | undefined;
++  let stderrTask: Promise<void> | undefined;
++  const sendSignal = (signal: NodeJS.Signals): void => {
++    try {
++      handle?.kill(signal);
++    } catch {
++      // best-effort only
++    }
++  };
++  const beginTermination = (): void => {
++    if (!handle || processExited) return;
++    sendSignal(STOP_SIGNAL);
++    killTimer ??= setTimeout(() => {
++      if (!processExited) sendSignal(KILL_SIGNAL);
++    }, KILL_GRACE_MS);
++  };
++
++  try {
++    handle = (input.spawn ?? spawnDeepagentsProcess)({
++      command: session.binary,
++      // No arguments: the task comes on stdin.
++      args: [],
++      ...(session.cwd && { cwd: session.cwd }),
++      env: session.env,
++    });
++    if (input.signal?.aborted) beginTermination();
++    else input.signal?.addEventListener(ABORT_EVENT, beginTermination, { once: true });
++
++    handle.stdin.on(STREAM_ERROR_EVENT, () => {
++      // Process startup/exit errors are reported through handle.exited.
++    });
++    handle.stdin.end(
++      JSON.stringify({
++        [PROMPT_FIELD]: input.prompt,
++        [SYSTEM_PROMPT_FIELD]: session.systemPrompt,
++        [MODEL_FIELD]: input.model,
++        [REASONING_SUMMARY_FIELD]: null,
++        [MCP_SERVERS_FIELD]: session.mcpServers,
++        // Required by the protocol; the agent's step limit is max_tool_steps.
++        [RECURSION_LIMIT_FIELD]: session.maxToolSteps,
++        [MAX_TOOL_STEPS_FIELD]: session.maxToolSteps,
++        [RESULT_SCHEMA_FIELD]: session.resultSchema ?? null,
++        [INSTRUCTION_FIELD]: session.instruction,
++        [START_URL_FIELD]: session.startUrl,
++        [RUN_SECONDS_FIELD]: session.runSeconds,
++        [RECORDS_DIR_FIELD]: session.recordsDir ?? null,
++      }),
++    );
++
++    const exitedTask = handle.exited.then(
++      (result) => {
++        processExited = true;
++        return result;
++      },
++      (error: unknown) => {
++        processExited = true;
++        throw error;
++      },
++    );
++    stderrTask = readStderr(handle.stderr, input.logger);
++    stdoutTask = (async () => {
++      const lines = createInterface({ input: handle!.stdout, crlfDelay: Infinity });
++      for await (const line of lines) {
++        let event: DeepagentsEvent;
++        try {
++          const parsed: unknown = JSON.parse(line);
++          if (!isRecord(parsed)) throw new Error("not an object");
++          event = parsed;
++        } catch {
++          input.logger.log({
++            category: LOG_CATEGORY,
++            message: `non-JSON stdout: ${clip(sanitizeErrorMessage(line), 500)}`,
++            level: 1,
++          });
++          continue;
++        }
++        if (shouldSanitizeEvent(event)) event = deepSanitizeValue(event) as DeepagentsEvent;
++        events.push(event);
++        logEvent(input.logger, event);
++        if (event[TYPE_FIELD] === FINAL_EVENT) {
++          sawFinal = true;
++          if (typeof event[TEXT_FIELD] === "string") finalMessage = event[TEXT_FIELD];
++        }
++        if (event[TYPE_FIELD] === USAGE_EVENT) {
++          sawUsage = true;
++          tokenUsage = extractDeepagentsTokenUsage(event);
++        }
++        if (event[TYPE_FIELD] === ERROR_EVENT) {
++          // A budget stop must not be overwritten by a later error (e.g. from teardown).
++          if (errorKind !== TOOL_STEP_BUDGET_KIND) {
++            errorKind = typeof event[KIND_FIELD] === "string" ? event[KIND_FIELD] : EXCEPTION_KIND;
++            stopReason =
++              typeof event[MESSAGE_FIELD] === "string"
++                ? event[MESSAGE_FIELD]
++                : "agent program error";
++          }
++        }
++        if (event[TYPE_FIELD] === TOOL_RESULT_EVENT && typeof event[NAME_FIELD] === "string") {
++          await input.onToolResult?.(
++            event[NAME_FIELD],
++            typeof event[SERVER_FIELD] === "string" ? event[SERVER_FIELD] : undefined,
++          );
++        }
++      }
++    })();
++    const exited = await Promise.race([
++      exitedTask,
++      rejectOnFailure(stdoutTask),
++      rejectOnFailure(stderrTask),
++    ]);
++    exitCode = exited.code;
++    exitSignal = exited.signal;
++    await drainStreams(handle, [stdoutTask, stderrTask], KILL_GRACE_MS);
++    if (exitCode === null && !stopReason) {
++      stopReason = exitSignal
++        ? `agent program terminated by ${exitSignal}`
++        : "agent program exited without an exit code";
++    } else if (exitCode !== 0 && !stopReason) {
++      stopReason = `agent program exited with code ${exitCode}`;
++    }
++    if (exitCode === 0 && (!sawFinal || !sawUsage) && !stopReason) {
++      stopReason = "agent program exited without a terminal final/usage event";
++    }
++  } catch (error) {
++    iterationError = sanitizeErrorMessage(stringifyError(error));
++    stopReason = iterationError;
++    beginTermination();
++    if (handle && !processExited) {
++      await waitForExit(handle.exited, KILL_GRACE_MS);
++      if (!processExited) sendSignal(KILL_SIGNAL);
++    }
++    if (handle) await drainStreams(handle, [stdoutTask, stderrTask], KILL_GRACE_MS);
++    input.logger.warn({
++      category: LOG_CATEGORY,
++      message: `agent program stopped before a normal result: ${stopReason}`,
++      level: 0,
++      auxiliary: { error: { value: stopReason, type: STRING_AUXILIARY } },
++    });
++  } finally {
++    if (killTimer !== undefined) clearTimeout(killTimer);
++    input.signal?.removeEventListener(ABORT_EVENT, beginTermination);
++  }
++
++  const sanitizedReason = stopReason ? sanitizeErrorMessage(stopReason) : undefined;
++  return {
++    events,
++    finalMessage,
++    status: resolveDeepagentsStatus({
++      errorKind,
++      exitCode,
++      signal: exitSignal,
++      iterationError,
++      sawTerminalEvents: sawFinal && sawUsage,
++    }),
++    ...(sanitizedReason && { stopReason: sanitizedReason }),
++    tokenUsage,
++    exitCode,
++    ...(iterationError !== undefined && { iterationError }),
++  };
++}
++
++function logEvent(logger: HarnessLogger, event: DeepagentsEvent): void {
++  const type = typeof event[TYPE_FIELD] === "string" ? event[TYPE_FIELD] : UNKNOWN_EVENT;
++  const level = harnessEventLogLevel(type, {
++    isError: type === ERROR_EVENT || (type === TOOL_RESULT_EVENT && event[OK_FIELD] === false),
++    hasContent: type === ASSISTANT_EVENT || type === TOOL_RESULT_EVENT || type === FINAL_EVENT,
++  });
++  if (level === undefined) return;
++  const summary = summarizeDeepagentsEvent(event);
++  logger.log({
++    category: LOG_CATEGORY,
++    message: sanitizeErrorMessage(summary.message),
++    level,
++    auxiliary: {
++      type: { value: type, type: STRING_AUXILIARY },
++      ...(summary.detail && {
++        detail: { value: sanitizeErrorMessage(summary.detail), type: STRING_AUXILIARY },
++      }),
++    },
++  });
++}
++
++async function readStderr(stream: NodeJS.ReadableStream, logger: HarnessLogger): Promise<void> {
++  const lines = createInterface({ input: stream, crlfDelay: Infinity });
++  for await (const line of lines) {
++    logger.log({ category: LOG_CATEGORY, message: sanitizeErrorMessage(line), level: 1 });
++  }
++}
++
++function rejectOnFailure(task: Promise<void>): Promise<never> {
++  return task.then(
++    () => new Promise<never>(() => undefined),
++    (error: unknown) => Promise.reject(error),
++  );
++}
++
++async function drainStreams(
++  handle: DeepagentsProcessHandle,
++  tasks: Array<Promise<void> | undefined>,
++  timeoutMs: number,
++): Promise<void> {
++  const active = tasks.filter((task): task is Promise<void> => task !== undefined);
++  if (active.length === 0) return;
++  let timer: ReturnType<typeof setTimeout> | undefined;
++  const timedOut = await Promise.race([
++    Promise.allSettled(active).then(() => false),
++    new Promise<boolean>((resolve) => {
++      timer = setTimeout(() => resolve(true), timeoutMs);
++    }),
++  ]);
++  if (timer !== undefined) clearTimeout(timer);
++  if (!timedOut) return;
++  for (const stream of [handle.stdout, handle.stderr]) {
++    (stream as NodeJS.ReadableStream & { destroy?: () => void }).destroy?.();
++  }
++}
++
++async function waitForExit(
++  exited: Promise<{ code: number | null; signal: NodeJS.Signals | null }>,
++  timeoutMs: number,
++): Promise<void> {
++  let timer: ReturnType<typeof setTimeout> | undefined;
++  await Promise.race([
++    exited.then(
++      (): undefined => undefined,
++      (): undefined => undefined,
++    ),
++    new Promise<void>((resolve) => {
++      timer = setTimeout(resolve, timeoutMs);
++    }),
++  ]);
++  if (timer !== undefined) clearTimeout(timer);
++}
++
++/** Error events, failed tool results and anything carrying error text are redacted whole. */
++function shouldSanitizeEvent(event: DeepagentsEvent): boolean {
++  if (
++    event[TYPE_FIELD] === ERROR_EVENT ||
++    (event[TYPE_FIELD] === TOOL_RESULT_EVENT && event[OK_FIELD] === false)
++  )
++    return true;
++  return containsSensitiveTextField(event);
++}
++
++function containsSensitiveTextField(value: unknown): boolean {
++  if (Array.isArray(value)) return value.some(containsSensitiveTextField);
++  if (!isRecord(value)) return false;
++  return Object.entries(value).some(
++    ([key, child]) =>
++      (SENSITIVE_TEXT_FIELDS.has(key) && typeof child === "string") ||
++      containsSensitiveTextField(child),
++  );
++}
++
++function deepSanitizeValue(value: unknown): unknown {
++  if (typeof value === "string") return sanitizeErrorMessage(value);
++  if (Array.isArray(value)) return value.map(deepSanitizeValue);
++  if (!isRecord(value)) return value;
++  return Object.fromEntries(
++    Object.entries(value).map(([key, child]) => [key, deepSanitizeValue(child)]),
++  );
++}
+diff --git a/packages/evals/framework/karpoBrowserToolAdapter.ts b/packages/evals/framework/karpoBrowserToolAdapter.ts
+new file mode 100644
+index 000000000..8cca1e929
+--- /dev/null
++++ b/packages/evals/framework/karpoBrowserToolAdapter.ts
+@@ -0,0 +1,198 @@
++/**
++ * The tool mount the `karpo_browser` harness's agent program runs on.
++ *
++ * Adapted from prepareDeepagentsToolAdapter
++ * (packages/evals/framework/deepagentsToolAdapter.ts at c8e096cb),
++ * Copyright (c) 2024 Browserbase Inc., MIT License (see LICENSE at the
++ * repository root), reusing its normalizeDeepagentsMcpServers. It changes
++ * only:
++ * - the tool surface: `stagehand_facade` alone;
++ * - a mount that is missing or not MCP: refused with one error;
++ * - its input type (ExternalHarnessPrepareInput), its temporary directory, log
++ *   category and messages;
++ * - the harness's name, the mount's kind and the variables it reads named as
++ *   module constants.
++ */
++import fsp from "node:fs/promises";
++import os from "node:os";
++import path from "node:path";
++import type { DeepagentsMcpServerConfig } from "@browserbasehq/stagehand-integrations-deepagents-sdk";
++import type { ProbeEvidence } from "stagehand-v3";
++import type { BrowserSessionLoss, StartupProfile, ToolSurface } from "../core/contracts/tool.js";
++import { EvalsError } from "../errors.js";
++import { startAgentToolRuntime } from "./agentToolRuntime.js";
++import type { ExternalHarnessPrepareInput } from "./benchHarness.js";
++import type { BrowserSessionInfo } from "./browserSession.js";
++import { normalizeDeepagentsMcpServers } from "./deepagentsToolAdapter.js";
++import { AGENT_PROGRAM_HARNESS, STRING_AUXILIARY } from "./karpoBrowserSession.js";
++import { resolveStartupProfile, resolveToolSurface } from "./harnesses/toolSurfaceResolution.js";
++import { ObservationRecorder, type StepObservation } from "./observationRecorder.js";
++
++export interface PreparedAgentProgramToolAdapter {
++  toolSurface: ToolSurface;
++  startupProfile: StartupProfile;
++  cwd: string;
++  env: Record<string, string>;
++  promptInstructions: string;
++  /** Browser behind the mounted surface, resolved before the agent starts. */
++  browserSession: BrowserSessionInfo;
++  mcpServers: Record<string, DeepagentsMcpServerConfig>;
++  captureEvidence?: () => Promise<ProbeEvidence>;
++  /** Set once the mounted browser is gone for the rest of the run. */
++  browserSessionLoss?: () => BrowserSessionLoss | undefined;
++  drainStepObservations?: () => Promise<StepObservation[]>;
++  recordObservation?: () => void;
++  observedToolMatcher: (name: string) => boolean;
++  cleanup: () => Promise<void>;
++}
++
++/**
++ * The agent calls the facade's own tools and, on Browserbase, connects to the
++ * facade's session, so it runs on the facade only.
++ */
++export const AGENT_PROGRAM_TOOL_SURFACES: ToolSurface[] = ["stagehand_facade"];
++
++/** How the agent's tools must be mounted: as MCP servers. */
++const MCP_MOUNT = "mcp";
++/** The start of the name of the run's temporary directory, its working directory. */
++const TEMP_DIR_PREFIX = "stagehand-evals-karpo-browser-";
++/** How long the mount's cleanup and an evidence capture may take, when set. */
++const MOUNT_CLEANUP_TIMEOUT_ENV = "EVAL_AGENT_MOUNT_CLEANUP_TIMEOUT_MS";
++const CAPTURE_EVIDENCE_TIMEOUT_ENV = "EVAL_CAPTURE_EVIDENCE_TIMEOUT_MS";
++
++export async function prepareAgentProgramToolAdapter(
++  input: ExternalHarnessPrepareInput,
++): Promise<PreparedAgentProgramToolAdapter> {
++  const toolSurface = resolveToolSurface(
++    {
++      harness: AGENT_PROGRAM_HARNESS,
++      supportedToolSurfaces: AGENT_PROGRAM_TOOL_SURFACES,
++    },
++    input.toolSurface,
++  );
++  if (toolSurface === undefined) {
++    throw new EvalsError(`${AGENT_PROGRAM_HARNESS} harness requires a tool surface.`);
++  }
++  const startupProfile = resolveStartupProfile(
++    toolSurface,
++    input.environment,
++    input.startupProfile,
++  );
++  const runtime = await startAgentToolRuntime({
++    toolSurface,
++    startupProfile,
++    environment: input.environment,
++    logger: input.logger,
++  });
++
++  let cwd: string | undefined;
++  try {
++    const mount = runtime.running.agentMount;
++    if (mount?.via !== MCP_MOUNT) {
++      throw new EvalsError(`Tool surface "${toolSurface}" does not provide an MCP agent mount.`);
++    }
++    const mcpServers = normalizeDeepagentsMcpServers(mount.mcpServers);
++    const recorder = runtime.running.captureEvidence
++      ? new ObservationRecorder(runtime.running.captureEvidence)
++      : undefined;
++    cwd = await fsp.mkdtemp(path.join(os.tmpdir(), TEMP_DIR_PREFIX));
++    const capturedCwd = cwd;
++    const serverNames = Object.keys(mcpServers);
++    let cleanupPromise: Promise<void> | undefined;
++
++    input.logger.log({
++      category: AGENT_PROGRAM_HARNESS,
++      message: `Initialized ${toolSurface} MCP mount for the agent program (servers: ${serverNames.join(", ")}).`,
++      level: 2,
++      auxiliary: {
++        startupProfile: { value: startupProfile, type: STRING_AUXILIARY },
++        environment: { value: input.environment, type: STRING_AUXILIARY },
++      },
++    });
++
++    return {
++      toolSurface,
++      startupProfile,
++      cwd,
++      env: { ...process.env } as Record<string, string>,
++      promptInstructions: mount.promptInstructions,
++      browserSession: runtime.browserSession,
++      mcpServers,
++      ...(runtime.running.browserSessionLoss && {
++        browserSessionLoss: runtime.running.browserSessionLoss,
++      }),
++      ...(runtime.running.captureEvidence && {
++        captureEvidence: boundedCaptureEvidence(runtime.running.captureEvidence),
++      }),
++      ...(recorder && {
++        drainStepObservations: async () => {
++          await recorder.settle();
++          return recorder.drain();
++        },
++        recordObservation: () => void recorder.record(),
++      }),
++      observedToolMatcher: (name) => serverNames.some((server) => name.startsWith(`${server}.`)),
++      cleanup: async () => {
++        cleanupPromise ??= (async () => {
++          try {
++            await withTimeout(
++              runtime.cleanup(),
++              readPositiveIntEnv(MOUNT_CLEANUP_TIMEOUT_ENV, 30_000),
++            );
++          } catch {
++            // best-effort only
++          } finally {
++            await fsp.rm(capturedCwd, { recursive: true, force: true });
++          }
++        })();
++        await cleanupPromise;
++      },
++    };
++  } catch (error) {
++    await withTimeout(
++      runtime.cleanup(),
++      readPositiveIntEnv(MOUNT_CLEANUP_TIMEOUT_ENV, 30_000),
++    ).catch((): undefined => undefined);
++    if (cwd) await fsp.rm(cwd, { recursive: true, force: true });
++    throw error;
++  }
++}
++
++function boundedCaptureEvidence(
++  capture: () => Promise<ProbeEvidence>,
++): () => Promise<ProbeEvidence> {
++  return async () => {
++    try {
++      return await withTimeout(capture(), readPositiveIntEnv(CAPTURE_EVIDENCE_TIMEOUT_ENV, 15_000));
++    } catch {
++      return {};
++    }
++  };
++}
++
++function readPositiveIntEnv(key: string, fallback: number): number {
++  const parsed = Number.parseInt(process.env[key] ?? "", 10);
++  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
++}
++
++function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
++  return new Promise<T>((resolve, reject) => {
++    const timer = setTimeout(
++      () =>
++        reject(
++          new Error(`${AGENT_PROGRAM_HARNESS} adapter operation timed out after ${timeoutMs}ms`),
++        ),
++      timeoutMs,
++    );
++    promise.then(
++      (value) => {
++        clearTimeout(timer);
++        resolve(value);
++      },
++      (error) => {
++        clearTimeout(timer);
++        reject(error);
++      },
++    );
++  });
++}
+diff --git a/packages/evals/tests/framework/benchHarness.test.ts b/packages/evals/tests/framework/benchHarness.test.ts
+index 28f4dd6a6..27339b9d7 100644
+--- a/packages/evals/tests/framework/benchHarness.test.ts
++++ b/packages/evals/tests/framework/benchHarness.test.ts
+@@ -16,6 +16,7 @@ import {
+   fxHarness,
+   deepagentsHarness,
+   eveHarness,
++  karpoBrowserHarness,
+   registerBenchHarness,
+ } from "../../framework/benchHarness.js";
+ import { MASTRA_TOOL_SURFACES } from "../../framework/mastraToolAdapter.js";
+@@ -42,6 +43,7 @@ describe("bench harness registry", () => {
+       "cursor",
+       "claude_cua",
+       "gemini_cua",
++      "karpo_browser",
+     ]);
+   });
+ 
+@@ -49,7 +51,7 @@ describe("bench harness registry", () => {
+     expect(parseBenchHarness(undefined)).toBe("stagehand");
+     expect(parseBenchHarness("codex")).toBe("codex");
+     expect(() => parseBenchHarness("nope")).toThrow(
+-      /Unknown harness "nope"\. Supported: stagehand, claude_code, codex, mastra, pi, eve, deepagents, fx, cursor, claude_cua, gemini_cua\./,
++      /Unknown harness "nope"\. Supported: stagehand, claude_code, codex, mastra, pi, eve, deepagents, fx, cursor, claude_cua, gemini_cua, karpo_browser\./,
+     );
+   });
+ 
+@@ -192,6 +194,18 @@ describe("bench harness registry", () => {
+     expect(harness.defaultModels).toEqual(["cursor/auto"]);
+   });
+ 
++  it("registers karpo_browser on the facade only", () => {
++    const harness = getBenchHarness("karpo_browser");
++
++    expect(harness).toBe(karpoBrowserHarness);
++    expect(parseBenchHarness("karpo_browser")).toBe("karpo_browser");
++    expect(isExecutableBenchHarness("karpo_browser")).toBe(true);
++    expect(harness.supportedTaskKinds).toEqual(["agent", "suite"]);
++    expect(harness.supportsApi).toBe(false);
++    expect(harness.supportedToolSurfaces).toEqual(["stagehand_facade"]);
++    expect(harness.defaultModels).toEqual(["karpo-browser/controller"]);
++  });
++
+   it("registers a new harness and rejects duplicate ids", () => {
+     const fakeHarness = {
+       harness: "fake_harness",
+diff --git a/packages/evals/tests/framework/karpoBrowserRunner.test.ts b/packages/evals/tests/framework/karpoBrowserRunner.test.ts
+new file mode 100644
+index 000000000..f638d6955
+--- /dev/null
++++ b/packages/evals/tests/framework/karpoBrowserRunner.test.ts
+@@ -0,0 +1,339 @@
++import fs from "node:fs";
++import fsp from "node:fs/promises";
++import os from "node:os";
++import path from "node:path";
++import { PassThrough } from "node:stream";
++import { afterEach, describe, expect, it, vi } from "vitest";
++import type { AvailableModel } from "stagehand-v3";
++import type { DeepagentsProcessSpawner } from "@browserbasehq/stagehand-integrations-deepagents-sdk";
++import { EVAL_SYSTEM_PROMPT } from "../../framework/evalSystemPrompt.js";
++import type { ExternalHarnessTaskPlan } from "../../framework/externalHarnessPlan.js";
++import { runAgentProgram } from "../../framework/karpoBrowserRunner.js";
++import type { PreparedAgentProgramToolAdapter } from "../../framework/karpoBrowserToolAdapter.js";
++import { EvalLogger } from "../../logger.js";
++
++// fakeAgent is adapted from the fake spawners of deepagentsRunner.test.ts, which tests
++// runDeepagentsAgent (at c8e096cb; Copyright (c) 2024 Browserbase Inc., MIT License).
++
++/**
++ * The row's trajectory directory the task's result names, when a test sets one
++ * (as the verifier does once it has written the trajectory); the result is
++ * otherwise as it comes.
++ */
++const trajectory = vi.hoisted(() => ({ dir: undefined as string | undefined }));
++vi.mock("../../framework/harnesses/externalRunner.js", async (importOriginal) => {
++  const actual =
++    await importOriginal<typeof import("../../framework/harnesses/externalRunner.js")>();
++  return {
++    ...actual,
++    runExternalHarnessTask: async (...args: Parameters<typeof actual.runExternalHarnessTask>) => {
++      const result = await actual.runExternalHarnessTask(...args);
++      return trajectory.dir === undefined ? result : { ...result, trajectoryDir: trajectory.dir };
++    },
++  };
++});
++
++const BIN = "/opt/agent-program/bin/agent";
++
++const plan: ExternalHarnessTaskPlan = {
++  dataset: "hardbenchmark",
++  taskId: "hb-1",
++  startUrl: "https://example.com/start",
++  instruction: "Find the cheapest permit.\nReport the park.",
++};
++
++const mcpServers = {
++  stagehand: { command: "node", args: ["-e", "relay"], env: { PORT: "4242" } },
++};
++
++/** The eval process's environment, as the tool adapter hands it on. */
++const INHERITED_ENV = { PATH: "/usr/bin", AGENT_SETTING: "kept" };
++
++function adapter(observed: string[] = []): PreparedAgentProgramToolAdapter {
++  return {
++    toolSurface: "stagehand_facade",
++    startupProfile: "tool_launch_local",
++    cwd: "/tmp/karpo-browser-runner-test",
++    env: INHERITED_ENV,
++    promptInstructions: "Use the facade tools.",
++    browserSession: { provider: "local" },
++    mcpServers,
++    recordObservation: () => observed.push("observation"),
++    observedToolMatcher: (name) => name.startsWith("stagehand."),
++    cleanup: async () => {},
++  };
++}
++
++/**
++ * A process that records how it was started and what it read, does `onRequest`
++ * with what it read, then prints `events`.
++ */
++function fakeAgent(
++  events: Array<Record<string, unknown>>,
++  onRequest?: (request: Record<string, unknown>) => void,
++) {
++  const started: Array<Parameters<DeepagentsProcessSpawner>[0]> = [];
++  const requests: Array<Record<string, unknown>> = [];
++  const spawn: DeepagentsProcessSpawner = (spec) => {
++    started.push(spec);
++    const stdin = new PassThrough();
++    const stdout = new PassThrough();
++    const stderr = new PassThrough();
++    let raw = "";
++    stdin.on("data", (chunk) => (raw += chunk.toString()));
++    stdin.on("finish", () => {
++      const request = JSON.parse(raw) as Record<string, unknown>;
++      requests.push(request);
++      onRequest?.(request);
++    });
++    queueMicrotask(() => {
++      for (const event of events) stdout.write(`${JSON.stringify(event)}\n`);
++      stdout.end();
++      stderr.end();
++    });
++    return {
++      stdin,
++      stdout,
++      stderr,
++      exited: Promise.resolve({ code: 0, signal: null }),
++      kill: () => {},
++    };
++  };
++  return { spawn, started, requests };
++}
++
++const UNREPORTED_USAGE = {
++  type: "usage",
++  input_tokens: 0,
++  output_tokens: 0,
++  total_tokens: 0,
++  reported: false,
++};
++
++const DONE = {
++  type: "final",
++  text: 'EVAL_RESULT: {"success":true,"summary":"done","finalAnswer":"x"}',
++};
++
++/** The record the agent writes: one JSON file, as karpo-browser's adapter writes it. */
++const RECORD_FILE = "karpo-browser-run.json";
++const RECORDED = '{"report":{"success":true,"summary":"finished","finalAnswer":"x"}}';
++
++/** Writes the agent's record into the directory its input names. */
++function writeRecords(request: Record<string, unknown>): void {
++  const records = request.records_dir as string;
++  fs.mkdirSync(records, { recursive: true });
++  fs.writeFileSync(path.join(records, RECORD_FILE), RECORDED);
++}
++
++/** Runs the harness in the working directory `cwd`, the agent writing its records. */
++async function runRecording(cwd: string, logger = new EvalLogger(false)) {
++  const agent = fakeAgent([DONE, UNREPORTED_USAGE], writeRecords);
++  const result = await runAgentProgram({
++    plan,
++    model: "karpo-browser/controller" as AvailableModel,
++    logger,
++    toolAdapter: { ...adapter(), cwd },
++    spawn: agent.spawn,
++    env: { EVAL_AGENT_BIN: BIN },
++  });
++  return { agent, result };
++}
++
++/** Runs the harness on `toolAdapter` and gives the environment the program was started in. */
++async function startedEnv(toolAdapter: PreparedAgentProgramToolAdapter) {
++  const agent = fakeAgent([DONE, UNREPORTED_USAGE]);
++  await runAgentProgram({
++    plan,
++    model: "karpo-browser/controller" as AvailableModel,
++    logger: new EvalLogger(false),
++    toolAdapter,
++    spawn: agent.spawn,
++    env: { EVAL_AGENT_BIN: BIN },
++  });
++  return agent.started[0]?.env;
++}
++
++describe("karpo_browser runner", () => {
++  afterEach(() => {
++    trajectory.dir = undefined;
++  });
++
++  it("starts the agent program with no arguments, the task, the mount and the budget", async () => {
++    const observed: string[] = [];
++    const agent = fakeAgent([
++      { type: "assistant", text: "CLICK link Permits" },
++      { type: "tool_call", id: "1", name: "run", server: "stagehand", args: {} },
++      { type: "tool_result", id: "1", name: "run", server: "stagehand", ok: true, text: "ok" },
++      {
++        type: "final",
++        text: 'EVAL_RESULT: {"success":true,"summary":"done","finalAnswer":"Big Meadows"}',
++      },
++      UNREPORTED_USAGE,
++    ]);
++    const result = await runAgentProgram({
++      plan,
++      model: "karpo-browser/controller" as AvailableModel,
++      logger: new EvalLogger(false),
++      toolAdapter: adapter(observed),
++      spawn: agent.spawn,
++      env: { EVAL_AGENT_BIN: BIN },
++    });
++
++    expect(agent.started).toEqual([
++      {
++        command: BIN,
++        args: [],
++        cwd: "/tmp/karpo-browser-runner-test",
++        env: INHERITED_ENV,
++      },
++    ]);
++    const [request] = agent.requests;
++    expect(request).toMatchObject({
++      system_prompt: EVAL_SYSTEM_PROMPT,
++      model: "karpo-browser/controller",
++      reasoning_summary: null,
++      mcp_servers: mcpServers,
++      max_tool_steps: 100,
++      result_schema: null,
++      instruction: plan.instruction,
++      start_url: plan.startUrl,
++      run_seconds: 2400,
++      records_dir: "/tmp/karpo-browser-runner-test/agent-records",
++    });
++    expect(request?.prompt).toContain(`Start URL: ${plan.startUrl}`);
++    expect(request?.prompt).toContain("Use the facade tools.");
++    expect(observed).toEqual(["observation"]);
++    expect(result).toMatchObject({
++      _success: true,
++      finalAnswer: "Big Meadows",
++      harnessStatus: "completed",
++      terminationReason: "completed",
++      usageConvention: "unreported",
++      harnessConfiguration: { stepBudget: 100, stepBudgetUnit: "tool_calls", runSeconds: 2400 },
++    });
++  });
++
++  it("gives the program a Browserbase row's session id in BROWSERBASE_SESSION_ID", async () => {
++    // The row's session wins over a value the eval process inherited.
++    const inherited = { ...INHERITED_ENV, BROWSERBASE_SESSION_ID: "inherited" };
++    const toolAdapter = {
++      ...adapter(),
++      env: inherited,
++      browserSession: {
++        provider: "browserbase" as const,
++        sessionId: "bb-session-1",
++        sessionUrl: "https://www.browserbase.com/sessions/bb-session-1",
++      },
++    };
++    expect(await startedEnv(toolAdapter)).toEqual({
++      ...INHERITED_ENV,
++      BROWSERBASE_SESSION_ID: "bb-session-1",
++    });
++    expect(toolAdapter.env).toEqual(inherited);
++
++    // A Browserbase surface that did not report its session, or a local browser: nothing added.
++    expect(await startedEnv({ ...adapter(), browserSession: { provider: "browserbase" } })).toEqual(
++      INHERITED_ENV,
++    );
++    expect(await startedEnv(adapter())).toEqual(INHERITED_ENV);
++  });
++
++  it("takes the budget and the time limit from the environment and reports a budget stop", async () => {
++    const agent = fakeAgent([
++      {
++        type: "error",
++        kind: "tool_step_budget",
++        message: "tool step budget exhausted (12 steps)",
++      },
++      {
++        type: "final",
++        text: 'EVAL_RESULT: {"success":false,"summary":"limit: Stopped after 2 steps.","finalAnswer":null}',
++      },
++      UNREPORTED_USAGE,
++    ]);
++    const result = await runAgentProgram({
++      plan: { ...plan, dataset: "webvoyager" },
++      model: "karpo-browser/controller" as AvailableModel,
++      logger: new EvalLogger(false),
++      toolAdapter: adapter(),
++      spawn: agent.spawn,
++      env: {
++        EVAL_AGENT_BIN: BIN,
++        EVAL_AGENT_MAX_STEPS: "12",
++        EVAL_AGENT_RUN_SECONDS: "300",
++      },
++    });
++
++    expect(agent.requests[0]).toMatchObject({ max_tool_steps: 12, run_seconds: 300 });
++    expect(result).toMatchObject({
++      _success: false,
++      harnessStatus: "max_turns",
++      terminationReason: "step_budget",
++      harnessStopReason: "tool step budget exhausted (12 steps)",
++      harnessConfiguration: { stepBudget: 12, runSeconds: 300 },
++    });
++  });
++
++  it("refuses an agent program that is not given by an absolute path", async () => {
++    for (const env of [{}, { EVAL_AGENT_BIN: "bin/agent" }]) {
++      const agent = fakeAgent([]);
++      await expect(
++        runAgentProgram({
++          plan,
++          model: "karpo-browser/controller" as AvailableModel,
++          logger: new EvalLogger(false),
++          toolAdapter: adapter(),
++          spawn: agent.spawn,
++          env,
++        }),
++      ).rejects.toThrow(/EVAL_AGENT_BIN must be the absolute path of the agent program/);
++      expect(agent.started).toEqual([]);
++    }
++  });
++
++  it("copies the agent's records into the row's trajectory directory, where they outlive its working directory", async () => {
++    const root = await fsp.mkdtemp(path.join(os.tmpdir(), "karpo-browser-runner-records-"));
++    try {
++      const cwd = path.join(root, "work");
++      trajectory.dir = path.join(root, "trajectory");
++      await fsp.mkdir(cwd);
++      await fsp.mkdir(trajectory.dir);
++      const { agent, result } = await runRecording(cwd);
++
++      expect(agent.requests[0]?.records_dir).toBe(path.join(cwd, "agent-records"));
++      expect(result).toMatchObject({ _success: true, trajectoryDir: trajectory.dir });
++      // The working directory is removed after the row, as the tool adapter's cleanup does.
++      await fsp.rm(cwd, { recursive: true, force: true });
++      const kept = path.join(trajectory.dir, "agent", RECORD_FILE);
++      expect(await fsp.readFile(kept, "utf8")).toBe(RECORDED);
++    } finally {
++      await fsp.rm(root, { recursive: true, force: true });
++    }
++  });
++
++  it("copies nothing to a trajectory directory that was not written, and a failed copy fails no row", async () => {
++    const root = await fsp.mkdtemp(path.join(os.tmpdir(), "karpo-browser-runner-records-"));
++    try {
++      const cwd = path.join(root, "work");
++      await fsp.mkdir(cwd);
++      // Trajectories not persisted: the result names a directory that is never made.
++      trajectory.dir = path.join(root, "trajectory");
++      const { result } = await runRecording(cwd);
++      expect(result).toMatchObject({ _success: true });
++      await expect(fsp.stat(trajectory.dir)).rejects.toThrow(/ENOENT/);
++
++      // A copy that fails is logged; the row stands.
++      await fsp.mkdir(trajectory.dir);
++      await fsp.writeFile(path.join(trajectory.dir, "agent"), "");
++      const logger = new EvalLogger(false);
++      const failed = await runRecording(cwd, logger);
++      expect(failed.result).toMatchObject({ _success: true });
++      expect(logger.getLogs().map((line) => line.message)).toContainEqual(
++        expect.stringContaining("could not keep the agent's execution records"),
++      );
++    } finally {
++      await fsp.rm(root, { recursive: true, force: true });
++    }
++  });
++});
+diff --git a/packages/evals/tests/framework/karpoBrowserSession.test.ts b/packages/evals/tests/framework/karpoBrowserSession.test.ts
+new file mode 100644
+index 000000000..a78d1c26e
+--- /dev/null
++++ b/packages/evals/tests/framework/karpoBrowserSession.test.ts
+@@ -0,0 +1,188 @@
++import { PassThrough } from "node:stream";
++import { afterEach, describe, expect, it, vi } from "vitest";
++import type { DeepagentsProcessSpawner } from "@browserbasehq/stagehand-integrations-deepagents-sdk";
++import {
++  runAgentProgramSession,
++  type AgentProgramSessionConfig,
++} from "../../framework/karpoBrowserSession.js";
++
++// The failure paths of the session adapted from deepagents-sdk's runDeepagentsSession, tested
++// as deepagents-sdk/tests/session.test.ts (at c8e096cb; Copyright (c) 2024 Browserbase Inc.,
++// MIT License) tests the original.
++
++const logger = { log: vi.fn(), warn: vi.fn(), error: vi.fn() };
++
++const session: AgentProgramSessionConfig = {
++  binary: "/opt/agent-program/bin/agent",
++  env: {},
++  mcpServers: { stagehand: { command: "node", args: ["-e", "relay"] } },
++  systemPrompt: "system",
++  maxToolSteps: 12,
++  instruction: "Find the cheapest permit.",
++  startUrl: "https://example.com/",
++  runSeconds: 2400,
++};
++
++type Exit = { code: number | null; signal: NodeJS.Signals | null };
++
++/** A process that prints `lines`, then exits with `code` (0 by default) or `signal`. */
++function fakeSpawner(options: { lines?: string[]; code?: number | null; signal?: NodeJS.Signals }) {
++  const spawn: DeepagentsProcessSpawner = () => {
++    const stdout = new PassThrough();
++    const stderr = new PassThrough();
++    let resolveExit!: (value: Exit) => void;
++    const exited = new Promise<Exit>((resolve) => {
++      resolveExit = resolve;
++    });
++    queueMicrotask(() => {
++      for (const line of options.lines ?? []) stdout.write(`${line}\n`);
++      stdout.end();
++      stderr.end();
++      resolveExit({
++        code: options.code === undefined ? 0 : options.code,
++        signal: options.signal ?? null,
++      });
++    });
++    return { stdin: new PassThrough(), stdout, stderr, exited, kill: () => {} };
++  };
++  return spawn;
++}
++
++/**
++ * A process that records the signals it is sent. It keeps running after SIGTERM until SIGKILL, or
++ * until `exitAfterTermMs` after SIGTERM when given (as the agent reports a stop, then exits 1).
++ */
++function stoppableSpawner(exitAfterTermMs?: number) {
++  const kills: Array<NodeJS.Signals | undefined> = [];
++  const spawn: DeepagentsProcessSpawner = () => {
++    const stdout = new PassThrough();
++    const stderr = new PassThrough();
++    let resolveExit!: (value: Exit) => void;
++    const exited = new Promise<Exit>((resolve) => {
++      resolveExit = resolve;
++    });
++    const exit = (value: Exit) => {
++      stdout.end();
++      stderr.end();
++      resolveExit(value);
++    };
++    return {
++      stdin: new PassThrough(),
++      stdout,
++      stderr,
++      exited,
++      kill: (signal) => {
++        kills.push(signal);
++        if (signal === "SIGKILL") exit({ code: null, signal });
++        else if (exitAfterTermMs !== undefined)
++          setTimeout(() => exit({ code: 1, signal: null }), exitAfterTermMs);
++      },
++    };
++  };
++  return { spawn, kills };
++}
++
++function run(spawn: DeepagentsProcessSpawner, signal?: AbortSignal) {
++  return runAgentProgramSession({
++    prompt: "task",
++    model: "karpo-browser/controller",
++    logger,
++    session,
++    spawn,
++    ...(signal && { signal }),
++  });
++}
++
++describe("karpo_browser session", () => {
++  afterEach(() => {
++    vi.useRealTimers();
++  });
++
++  it("stops the agent with SIGTERM and kills it 5 s later when it is still running", async () => {
++    vi.useFakeTimers();
++    const agent = stoppableSpawner();
++    const controller = new AbortController();
++    const result = run(agent.spawn, controller.signal);
++
++    controller.abort();
++    expect(agent.kills).toEqual(["SIGTERM"]);
++    await vi.advanceTimersByTimeAsync(4_999);
++    expect(agent.kills).toEqual(["SIGTERM"]);
++    await vi.advanceTimersByTimeAsync(1);
++    expect(agent.kills).toEqual(["SIGTERM", "SIGKILL"]);
++    await expect(result).resolves.toMatchObject({
++      status: "sdk_error",
++      stopReason: "agent program terminated by SIGKILL",
++      exitCode: null,
++    });
++  });
++
++  it("does not kill an agent that ends within the 5 s after SIGTERM", async () => {
++    vi.useFakeTimers();
++    const agent = stoppableSpawner(4_000);
++    const controller = new AbortController();
++    const result = run(agent.spawn, controller.signal);
++
++    controller.abort();
++    await vi.advanceTimersByTimeAsync(4_000);
++    await expect(result).resolves.toMatchObject({
++      status: "sdk_error",
++      stopReason: "agent program exited with code 1",
++      exitCode: 1,
++    });
++    await vi.advanceTimersByTimeAsync(10_000);
++    expect(agent.kills).toEqual(["SIGTERM"]);
++  });
++
++  it("reports a non-zero exit as sdk_error, with the agent's reason when it gave one", async () => {
++    await expect(run(fakeSpawner({ code: 1 }))).resolves.toMatchObject({
++      status: "sdk_error",
++      stopReason: "agent program exited with code 1",
++      exitCode: 1,
++    });
++
++    const report = 'EVAL_RESULT: {"success":false,"summary":"failed","finalAnswer":null}';
++    const failed = await run(
++      fakeSpawner({
++        code: 1,
++        lines: [
++          JSON.stringify({ type: "error", kind: "exception", message: "Browser session lost." }),
++          JSON.stringify({ type: "final", text: report }),
++          JSON.stringify({ type: "usage", input_tokens: 0, output_tokens: 0, reported: false }),
++        ],
++      }),
++    );
++    expect(failed).toMatchObject({
++      status: "sdk_error",
++      stopReason: "Browser session lost.",
++      finalMessage: report,
++      exitCode: 1,
++    });
++  });
++
++  it("reports an exit without its final and usage events as sdk_error", async () => {
++    const truncated = await run(
++      fakeSpawner({
++        lines: [
++          JSON.stringify({ type: "assistant", text: "CLICK link Permits" }),
++          '{"type":"final","te',
++        ],
++      }),
++    );
++    expect(truncated).toMatchObject({
++      status: "sdk_error",
++      stopReason: "agent program exited without a terminal final/usage event",
++      finalMessage: "",
++      exitCode: 0,
++    });
++
++    const noUsage = await run(
++      fakeSpawner({ lines: [JSON.stringify({ type: "final", text: "EVAL_RESULT: {}" })] }),
++    );
++    expect(noUsage).toMatchObject({
++      status: "sdk_error",
++      stopReason: "agent program exited without a terminal final/usage event",
++      exitCode: 0,
++    });
++  });
++});
+diff --git a/packages/evals/tests/tui/doctorHarnesses.test.ts b/packages/evals/tests/tui/doctorHarnesses.test.ts
+index a6b18f354..aa7345582 100644
+--- a/packages/evals/tests/tui/doctorHarnesses.test.ts
++++ b/packages/evals/tests/tui/doctorHarnesses.test.ts
+@@ -96,6 +96,7 @@ describe("buildHarnessMatrix", () => {
+       "deepagents",
+       "claude_cua",
+       "gemini_cua",
++      "karpo_browser",
+     ]);
+     expect(matrix.skipped).toEqual(["fx", "cursor"]);
+     const cursor = await buildHarnessMatrix(options({ requested: ["cursor", "codex"] }));
+@@ -141,6 +142,36 @@ describe("buildHarnessMatrix", () => {
+     ]);
+   });
+ 
++  it("checks karpo_browser's agent program by absolute path, and nothing else", async () => {
++    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "doctor-agent-program-"));
++    try {
++      const bin = path.join(dir, "agent-program");
++      const notExecutable = path.join(dir, "agent-program.txt");
++      fs.writeFileSync(bin, "#!/bin/sh\n", { mode: 0o755 });
++      fs.writeFileSync(notExecutable, "", { mode: 0o644 });
++      const row = async (env: NodeJS.ProcessEnv) =>
++        (await buildHarnessMatrix(options({ env, requested: ["karpo_browser"] }))).harnesses[0];
++
++      expect((await row({}))?.binary).toEqual({
++        status: "fail",
++        label: "EVAL_AGENT_BIN",
++        detail: "EVAL_AGENT_BIN is not set; it names the agent program.",
++        fix: "export EVAL_AGENT_BIN=/absolute/path/to/agent-program",
++      });
++      for (const named of ["agent-program", notExecutable]) {
++        expect((await row({ EVAL_AGENT_BIN: named }))?.binary).toMatchObject({
++          status: "fail",
++          detail: `EVAL_AGENT_BIN=${named} is not the absolute path of an executable file.`,
++        });
++      }
++      const set = await row({ EVAL_AGENT_BIN: bin });
++      expect(set?.binary).toEqual({ status: "ok", label: "EVAL_AGENT_BIN" });
++      expect(set?.extra.status).toBe("skipped");
++    } finally {
++      fs.rmSync(dir, { recursive: true, force: true });
++    }
++  });
++
+   it("does not let unrequested harnesses or a quiet environment move the verdict", async () => {
+     const matrix = await buildHarnessMatrix(options({ env: { OPENAI_API_KEY: "sk" } }));
+     expect(matrix.harnesses.find((row) => row.harness === "claude_code")?.key.status).toBe("fail");
+diff --git a/packages/evals/tui/commands/doctorHarnesses.ts b/packages/evals/tui/commands/doctorHarnesses.ts
+index 7979a7a86..3733ed95f 100644
+--- a/packages/evals/tui/commands/doctorHarnesses.ts
++++ b/packages/evals/tui/commands/doctorHarnesses.ts
+@@ -22,6 +22,8 @@ import os from "node:os";
+ import path from "node:path";
+ import { createRequire } from "node:module";
+ import { getBenchHarness, listExecutableBenchHarnesses } from "../../framework/benchHarness.js";
++import { AGENT_BIN_ENV } from "../../framework/karpoBrowserRunner.js";
++import { AGENT_PROGRAM_HARNESS } from "../../framework/karpoBrowserSession.js";
+ import { ProviderConcurrency, providerFromModel } from "../../framework/providerConcurrency.js";
+ import { DEFAULT_VERIFIER_MODEL, resolveVerifierModel } from "../../framework/verifierModel.js";
+ import { getPackageRootDir } from "../../runtimePaths.js";
+@@ -574,6 +576,23 @@ async function buildHarnessRow(
+       };
+       break;
+     }
++    case AGENT_PROGRAM_HARNESS: {
++      // The agent program reads its model settings from its own environment, which
++      // the doctor does not know: only the program is checked.
++      const bin = env[AGENT_BIN_ENV]?.trim();
++      binary =
++        bin && path.isAbsolute(bin) && isExecutable(bin)
++          ? { status: "ok", label: AGENT_BIN_ENV }
++          : {
++              status: "fail",
++              label: AGENT_BIN_ENV,
++              detail: bin
++                ? `${AGENT_BIN_ENV}=${bin} is not the absolute path of an executable file.`
++                : `${AGENT_BIN_ENV} is not set; it names the agent program.`,
++              fix: `export ${AGENT_BIN_ENV}=/absolute/path/to/agent-program`,
++            };
++      break;
++    }
+     default:
+       binary = skipped();
+   }

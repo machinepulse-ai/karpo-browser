@@ -7,6 +7,7 @@
 
 import { parseArgs } from "node:util";
 import { Browser, system1Of } from "../../src/index.ts";
+import { BENCHMARK_MODEL, benchmarkBrowserOptions, benchmarkControlOptions } from "./benchmark.ts";
 import { controllerBrowser } from "./browser.ts";
 import { control } from "./controller.ts";
 import { CONTROLLER_MODELS, controllerModel } from "./models.ts";
@@ -32,6 +33,9 @@ reads the pages and answers.
   --cdp <ws address>     work a browser that runs already instead of starting Chrome
   --headless             start Chrome without a window
   --json                 print the whole result as JSON
+  --benchmark            the configuration of our published runs: DeepSeek V4.1 Flash on OpenRouter (the provider
+                         left to OpenRouter's routing), a 450 s deadline and the options in
+                         test/controller/benchmark.ts; a model SYSTEM2_MODEL names is used in place of that one
 
 System 2 is the model SYSTEM2_MODEL names (a preset: ${Object.keys(CONTROLLER_MODELS).join(", ")}; or any model id)
 at SYSTEM2_BASE_URL (default: OpenRouter's) with the key in SYSTEM2_API_KEY. System 1 is set by SYSTEM1_URL,
@@ -45,6 +49,7 @@ async function main(): Promise<number> {
       cdp: { type: "string" },
       headless: { type: "boolean", default: false },
       json: { type: "boolean", default: false },
+      benchmark: { type: "boolean", default: false },
       help: { type: "boolean", default: false },
     },
   });
@@ -58,7 +63,7 @@ async function main(): Promise<number> {
     return USAGE_EXIT;
   }
   const name = process.env[MODEL_VARIABLE]?.trim();
-  if (!name) {
+  if (!name && !flags.benchmark) {
     console.error(`no System 2 model: set ${MODEL_VARIABLE} to one of ${Object.keys(CONTROLLER_MODELS).join(", ")}`);
     console.error("or to any model id at SYSTEM2_BASE_URL");
     return USAGE_EXIT;
@@ -71,10 +76,15 @@ async function main(): Promise<number> {
     console.error(`no System 2 key: set ${API_KEY_VARIABLE}, or ${BASE_URL_VARIABLE} to a server on this machine`);
     return USAGE_EXIT;
   }
-  const browser = flags.cdp ? await Browser.connect(flags.cdp) : await Browser.launch({ headless: flags.headless });
+  const browserOptions = flags.benchmark ? benchmarkBrowserOptions() : {};
+  const browser = flags.cdp
+    ? await Browser.connect(flags.cdp, browserOptions)
+    : await Browser.launch({ ...browserOptions, headless: flags.headless });
   try {
     if (flags.url) await browser.open(flags.url);
-    const result = await control(controllerBrowser(browser), task, { model: controllerModel(name) });
+    const model = name ? controllerModel(name) : BENCHMARK_MODEL;
+    const options = flags.benchmark ? { ...benchmarkControlOptions(Date.now(), new Date()), model } : { model };
+    const result = await control(controllerBrowser(browser), task, options);
     console.log(flags.json ? JSON.stringify(result) : result.answer);
     return result.answered ? ANSWERED_EXIT : UNANSWERED_EXIT;
   } finally {
