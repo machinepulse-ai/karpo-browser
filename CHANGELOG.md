@@ -15,3 +15,6 @@ The first public release.
   `settleNetworkQuietMs`, `actionSettleMaxMs`), 3.5 s and the fast settle after an open (`openSettleMs`,
   `fastOpenSettle`), a 150 ms wait for a step's screenshot (`screenshotGraceMs`), BACK's read with the page
   (`backWithRead`) and follow-ups in the step's request (`mergeFollowups`). Pass the old values, or `false`, to restore.
+- FILL sets a slider to the value it is to show ("2:00 PM", "$500"), by the slider's own words for its value
+  (`aria-valuetext`) or else its value: a native range through the element, any other slider by arrow keys. A slider
+  that does not come to show the value is put back, and the step says what it holds.

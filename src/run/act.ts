@@ -35,7 +35,7 @@ import { takenOn, takenOnPage } from "./history.ts";
 const SETTLE_MS = 2_000;
 /** How far one scroll of the page moves it. */
 const SCROLL_STEP_PX = 600;
-/** The role of a range, which takes its value without a click (a click would move it). */
+/** The role of a slider, which takes its value without a click (a click would move it). */
 const SLIDER_ROLE = "slider";
 /** A link's address, as its element writes it. */
 const HREF_OF = "function () { return this.getAttribute('href'); }";
@@ -125,11 +125,11 @@ export class Acting {
     const changed = await this.check(element);
     if (changed !== undefined) return notDone(taken, changed);
     const { backendNodeId: node, session } = element.binding;
+    if (element.axRole === SLIDER_ROLE) return this.slide(taken, node, session, text);
     let expected: string;
     const began = Date.now();
     try {
-      const range = element.axRole === SLIDER_ROLE;
-      expected = await (range ? this.tab.setRange(node, session, text) : this.tab.fill(node, session, text));
+      expected = await this.tab.fill(node, session, text);
     } catch (error) {
       return error instanceof CdpTimeout ? this.unknown(taken, error.message) : notDone(taken, this.refused(error));
     }
@@ -147,6 +147,24 @@ export class Acting {
     return emptied(expected, held)
       ? { ...taken, note: this.texts.fill(EFFECT_NOT_TAKEN, { held: held ?? "" }) }
       : taken;
+  }
+
+  /**
+   * FILL on a slider: set to the value by what the slider shows (`Tab.setSlider`). One that does not come to show the
+   * value is back where it was, and the step says what it holds.
+   */
+  private async slide(taken: Taken, node: number, session: string, text: string): Promise<Taken> {
+    const began = Date.now();
+    let outcome: { set: boolean; shown: string };
+    try {
+      outcome = await this.tab.setSlider(node, session, text);
+    } catch (error) {
+      return error instanceof CdpTimeout ? this.unknown(taken, error.message) : notDone(taken, this.refused(error));
+    }
+    await this.settle(began);
+    // Read once more: a page may put a slider back as it settles.
+    const held = outcome.set ? ((await this.tab.sliderShows(node, session, text)) ?? outcome) : outcome;
+    return held.set ? taken : notDone(taken, this.texts.fill(EFFECT_NOT_TAKEN, { held: held.shown }));
   }
 
   /**
