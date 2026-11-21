@@ -7,7 +7,9 @@ import type { Offset } from "../contracts/capture.ts";
 import { items, member, number, string } from "../json.ts";
 import type { CallOptions, Connection } from "./cdp.ts";
 import { CdpError, CdpTimeout } from "./cdp.ts";
-import { firstNumber, NATIVE_VALUE_TYPES, nativeValue } from "./native-value.ts";
+import { NATIVE_VALUE_TYPES, nativeValue } from "./native-value.ts";
+import type { SliderState, SliderTarget } from "./slider.ts";
+import { pressesFor, readSlider, SLIDER_STATE, sameSlider, shown, shownNumber, shows, sliderTarget } from "./slider.ts";
 
 /** A point in the page's viewport (CSS pixels), as input events take it. */
 export type Point = Offset;
@@ -92,6 +94,10 @@ const KEYS = {
   Enter: { key: "Enter", code: "Enter", keyCode: 13, text: "\r" },
   Backspace: { key: "Backspace", code: "Backspace", keyCode: 8, text: undefined },
   Escape: { key: "Escape", code: "Escape", keyCode: 27, text: undefined },
+  ArrowLeft: { key: "ArrowLeft", code: "ArrowLeft", keyCode: 37, text: undefined },
+  ArrowUp: { key: "ArrowUp", code: "ArrowUp", keyCode: 38, text: undefined },
+  ArrowRight: { key: "ArrowRight", code: "ArrowRight", keyCode: 39, text: undefined },
+  ArrowDown: { key: "ArrowDown", code: "ArrowDown", keyCode: 40, text: undefined },
 } as const;
 export type Key = keyof typeof KEYS;
 
@@ -123,6 +129,19 @@ const CHURN_REPEATS = 3;
 const CHURN_WINDOW_MS = 3000;
 /** Between keys typed into a control: long enough for a page to move the focus on to its next box. */
 const KEY_GAP_MS = 40;
+/**
+ * How long a slider is given to answer an input, and how often it is read meanwhile: some answer a key only after a
+ * frame or two (Element Plus's took over 90 ms on 2026-11-20).
+ */
+const SLIDER_ANSWER_MS = 400;
+const SLIDER_POLL_MS = 30;
+/** How long after a slider came to show the value asked it is read once more: a page may still be moving it. */
+const SLIDER_CONFIRM_MS = 150;
+/** The most positions a slider is stepped through looking for the words asked, and the most keys toward a number. */
+const SLIDER_MAX_STEPS = 120;
+const SLIDER_MAX_KEYS = 300;
+/** The longest run of keys toward a number before the slider is read again. */
+const SLIDER_KEY_RUN = 10;
 /** The modifier the select-all key press carries (Ctrl); the `selectAll` editing command does the work. */
 const SELECT_ALL_MODIFIER = 2;
 /** How long a settle waits between reads of the page. */
@@ -655,17 +674,167 @@ export class Tab {
     return text;
   }
 
+  /** The slider an element is and what it holds now; undefined when it is no slider or is gone. */
+  async sliderState(backendNodeId: number, sessionId: string): Promise<SliderState | undefined> {
+    return readSlider(await this.on(backendNodeId, sessionId, SLIDER_STATE).catch(() => undefined));
+  }
+
+  /** Whether a slider shows the value a task's text asks, and what it shows; undefined when it is gone. */
+  async sliderShows(
+    backendNodeId: number,
+    sessionId: string,
+    text: string,
+  ): Promise<{ set: boolean; shown: string } | undefined> {
+    const now = await this.sliderState(backendNodeId, sessionId);
+    return now ? { set: shows(now, sliderTarget(text)), shown: shown(now) } : undefined;
+  }
+
   /**
-   * Sets a native range to the value a task's text asks, through the element as the browser's own input does,
-   * without a click: its standard value, else the number in the text ("$20", "22 years"). Returns the value it should
-   * now hold.
+   * Sets a slider to the value a task's text asks, by what the slider shows (`slider.ts`), without a click (a click
+   * moves it): a native range takes a number through the element, as the browser's own control does; any slider not
+   * showing the value then is moved by keys, as a person with a keyboard moves it, toward the number when it shows
+   * numbers, else a position at a time until it shows the words asked. One that does not come to show the value is
+   * put back where it was. Whether it shows the value now, and what it shows.
    */
-  async setRange(backendNodeId: number, sessionId: string, text: string): Promise<string> {
-    await this.focus(backendNodeId, sessionId);
-    const value = nativeValue("range", text) ?? firstNumber(text)?.toString();
-    if (value === undefined) throw new InputRefused("not_a_value", "range");
-    await this.on(backendNodeId, sessionId, SET_VALUE, [value]);
-    return value;
+  async setSlider(backendNodeId: number, sessionId: string, text: string): Promise<{ set: boolean; shown: string }> {
+    const start = await this.sliderState(backendNodeId, sessionId);
+    if (!start || start.disabled) throw new InputRefused("not_a_field");
+    const target = sliderTarget(text);
+    if (shows(start, target)) return { set: true, shown: shown(start) };
+    const read = (before: SliderState) => this.sliderAfter(backendNodeId, sessionId, before);
+    const setValue = async (value: string, before: SliderState) => {
+      await this.on(backendNodeId, sessionId, SET_VALUE, [value]);
+      return read(before);
+    };
+    let now = start;
+    if (start.native && target.number !== undefined) {
+      now = await setValue(String(target.number), start);
+      if (!shows(now, target) && !sameSlider(now, start)) now = await setValue(start.value, now);
+    }
+    // Keys reach a slider that has the focus alone: sent without it they would move whatever has it.
+    await this.focus(backendNodeId, sessionId).catch(() => {});
+    const keys: readonly [Key, Key] = start.vertical ? ["ArrowUp", "ArrowDown"] : ["ArrowRight", "ArrowLeft"];
+    const keyed = !shows(now, target) && (await this.sliderState(backendNodeId, sessionId))?.focused === true;
+    if (keyed) {
+      // A native range that shows its own value took the number above or cannot hold it: keys would not reach it.
+      const own = start.native && shownNumber(start) === Number(start.value);
+      if (target.number === undefined || shownNumber(now) === undefined) {
+        now = await this.keysToWords(target, now, keys, read);
+      } else if (!own) {
+        now = await this.keysToNumber(target.number, now, keys, read);
+      }
+    }
+    if (shows(now, target)) {
+      await this.connection.wait(SLIDER_CONFIRM_MS);
+      now = (await this.sliderState(backendNodeId, sessionId)) ?? now;
+      if (shows(now, target)) return { set: true, shown: shown(now) };
+    }
+    // Not the value asked: back where it was (the words' search ends there by itself).
+    const startNumber = shownNumber(start);
+    if (start.native) {
+      if (!sameSlider(now, start)) now = await setValue(start.value, now);
+    } else if (keyed && startNumber !== undefined) {
+      now = await this.keysToNumber(startNumber, now, keys, read);
+    }
+    return { set: false, shown: shown(now) };
+  }
+
+  /**
+   * What a slider holds once it has answered an input: read until it differs from `before` and two reads agree, for
+   * `SLIDER_ANSWER_MS` at most; `before` itself when it never answered.
+   */
+  private async sliderAfter(backendNodeId: number, sessionId: string, before: SliderState): Promise<SliderState> {
+    const until = Date.now() + SLIDER_ANSWER_MS;
+    let last = before;
+    for (;;) {
+      await this.connection.wait(SLIDER_POLL_MS);
+      const now = (await this.sliderState(backendNodeId, sessionId)) ?? last;
+      if (!sameSlider(now, before) && sameSlider(now, last)) return now;
+      if (Date.now() >= until) return now;
+      last = now;
+    }
+  }
+
+  /**
+   * Moves a slider that shows numbers toward a number by keys: one press toward it tells which way a key moves it (a
+   * page laid out right to left turns the arrows round) and how far; then runs of presses, read after each. A run
+   * that did not move it as far as its presses should have (steps of uneven size, or a page that takes quick presses
+   * for one) is followed by single presses, each read, which stop where the slider passes the number without holding
+   * it. What it holds then.
+   */
+  private async keysToNumber(
+    wanted: number,
+    from: SliderState,
+    [up, down]: readonly [Key, Key],
+    read: (before: SliderState) => Promise<SliderState>,
+  ): Promise<SliderState> {
+    const at = shownNumber(from);
+    if (at === undefined || at === wanted) return from;
+    const first = wanted > at ? up : down;
+    await this.press(first);
+    let now = await read(from);
+    const moved = (shownNumber(now) ?? at) - at;
+    if (moved === 0) return now;
+    const [more, less] = moved > 0 === (first === up) ? [up, down] : [down, up];
+    const step = Math.abs(moved);
+    let single = false;
+    for (let presses = 1; presses < SLIDER_MAX_KEYS; ) {
+      const here = shownNumber(now);
+      if (here === undefined || here === wanted) break;
+      const gap = wanted - here;
+      // Within half a step of the number without holding it: the steps may be finer here, so single presses go on.
+      const run: number =
+        (single ? 0 : pressesFor(gap, step, Math.min(SLIDER_KEY_RUN, SLIDER_MAX_KEYS - presses))) || 1;
+      single ||= run === 1;
+      for (let n = 0; n < run; n++) await this.press(gap > 0 ? more : less);
+      presses += run;
+      const after = await read(now);
+      const there = shownNumber(after);
+      if (sameSlider(after, now) || there === undefined) break;
+      now = after;
+      const passed = there !== wanted && there > wanted !== here > wanted;
+      if (single && passed) break;
+      if (passed || Math.abs(Math.abs(there - here) - run * step) > step / 2) single = true;
+    }
+    return now;
+  }
+
+  /**
+   * Steps a slider a position at a time until it shows the words asked: up from where it is, then down, back where
+   * it started between the two and when neither way shows them (`SLIDER_MAX_STEPS` positions at most). What it holds
+   * then.
+   */
+  private async keysToWords(
+    target: SliderTarget,
+    from: SliderState,
+    [up, down]: readonly [Key, Key],
+    read: (before: SliderState) => Promise<SliderState>,
+  ): Promise<SliderState> {
+    let now = from;
+    let steps = 0;
+    for (const [key, back] of [
+      [up, down],
+      [down, up],
+    ] as const) {
+      let moved = 0;
+      while (steps < SLIDER_MAX_STEPS) {
+        await this.press(key);
+        const after = await read(now);
+        if (sameSlider(after, now)) break;
+        now = after;
+        moved += 1;
+        steps += 1;
+        if (shows(now, target)) return now;
+      }
+      // Back a position at a time, each read: a page may take quick presses for one.
+      for (let n = 0; n < moved && !sameSlider(now, from); n++) {
+        await this.press(back);
+        const after = await read(now);
+        if (sameSlider(after, now)) break;
+        now = after;
+      }
+    }
+    return now;
   }
 
   /** Types into a field key by key, what it holds cleared first. */
