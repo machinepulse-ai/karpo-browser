@@ -11,6 +11,8 @@
 - `src/`: System 1. The browser (`browser/`), reading pages (`reading/`), asking the decision model (`decider/`),
   runs (`run/`), the MCP server (`mcp.ts`) and the command line (`cli.ts`). `index.ts` is the public interface.
 - `test/controller/`: the controller, an optional System 2. It uses only `src/index.ts`.
+- `evals/stagehand/`: the controller on Browserbase Benchmark v2, through Stagehand's eval harness (a patch to it, under
+  Stagehand's MIT license, and the agent it runs for each task).
 - `skills/karpo-browser/` and `.claude-plugin/`: what agents install.
 
 ## Rules
