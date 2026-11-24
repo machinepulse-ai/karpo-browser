@@ -484,6 +484,9 @@ class Reader {
     const role = this.roleOf(node);
     const name = collapse(this.nameOf(node));
     const held = () => node.children.flatMap((child) => this.walk(child, childClips, pointer));
+    // A frame the page hides draws nothing of its document, which visibility does not pass into: that document's own
+    // styles say it is visible (hCaptcha keeps its challenge so, above the page, until it asks something).
+    if (node.tag === IFRAME_TAG && !(style?.visible() ?? true)) return [];
     if (node.tag === IFRAME_TAG && node.children.length === 0) {
       return part && this.options.reading.unreadableAreas
         ? [{ kind: "unreadable", what: this.frameLabel(node), part }]

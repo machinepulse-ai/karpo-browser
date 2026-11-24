@@ -238,3 +238,64 @@ describe("a page that changes by itself", () => {
     expect(plain.steady).toBe(plain.state);
   });
 });
+
+describe("a frame the page hides", () => {
+  /** The first backend node id of the challenge's own document, apart from the checkout's. */
+  const CHALLENGE_FIRST_ID = 500;
+  /** Where the challenge frame sits in the viewport: in view, so only its `<iframe>`'s visibility hides it. */
+  const CHALLENGE_OFFSET = { x: 0, y: 100 };
+
+  /**
+   * A checkout as Eventbrite's is (2026-11-20), read: its hCaptcha challenge is an out-of-process frame in an
+   * `<iframe>` of the visibility given, which the widget keeps hidden until it asks something.
+   */
+  function checkout(visibility: string): string {
+    const page = captureOf({
+      url: "https://tickets.test/checkout",
+      title: "Checkout",
+      body: [main(heading("Checkout"), button("Register"), { tag: "iframe", attrs: { title: "hCaptcha challenge" } })],
+    });
+    const challenge = captureOf({
+      url: "https://captcha.test/challenge",
+      title: "hCaptcha",
+      body: [main("Please try again.", button("Verify Answers"))],
+      firstId: CHALLENGE_FIRST_ID,
+    });
+    const top = page.frames[0]!;
+    const { strings } = top.snapshot;
+    const document = top.snapshot.documents[0] as {
+      nodes: { nodeName: number[]; backendNodeId: number[] };
+      layout: { nodeIndex: number[]; styles: number[][] };
+    };
+    const iframe = document.nodes.nodeName.findIndex((name) => strings[name] === "IFRAME");
+    const row = document.layout.nodeIndex.indexOf(iframe);
+    strings.push(visibility);
+    document.layout.styles[row]![SNAPSHOT_STYLES.indexOf("visibility")] = strings.length - 1;
+    const frame = {
+      ...challenge.frames[0]!,
+      session: "S2",
+      target: "T2",
+      top: false,
+      offset: CHALLENGE_OFFSET,
+      owner: { session: top.session, backendNodeId: document.nodes.backendNodeId[iframe]! },
+    };
+    const { tree } = read({ ...page, frames: [top, frame] }, { reading: DEFAULT_PROFILE.reading, secrets: new Set() });
+    const texts = new Texts(DEFAULT_PROFILE.texts);
+    return writePage(tree, wholeSelection(), new Map(), DEFAULT_PROFILE.reading, texts).lines.join("\n");
+  }
+
+  it("reads the frame's document while its <iframe> is visible", () => {
+    const lines = checkout("visible");
+    expect(lines).toContain("button Register");
+    expect(lines).toContain("button Verify Answers");
+  });
+
+  it("reads nothing of it while its <iframe> is hidden: no visibility passes into another document", () => {
+    for (const visibility of ["hidden", "collapse"]) {
+      const lines = checkout(visibility);
+      expect(lines).toContain("button Register");
+      expect(lines).not.toContain("Verify Answers");
+      expect(lines).not.toContain("Please try again");
+    }
+  });
+});

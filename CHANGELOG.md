@@ -22,3 +22,6 @@ The first public release.
   says in the page's console (`browserbase-solving-started`, then `-finished` or `-errored`): at most 60 s, not past a
   run's stop. SOLVE_CAPTCHA waits for that solving too and says the browser solved it. A browser that says nothing of
   the kind is read as before.
+- A frame whose `<iframe>` the page hides (visibility `hidden` or `collapse`) is not read. Visibility does not pass
+  into another document, so the frame's own styles said it was visible: hCaptcha's challenge, kept hidden above the
+  page until it asks something, was listed under `above:` with its buttons, and System 1 took it for a challenge.
