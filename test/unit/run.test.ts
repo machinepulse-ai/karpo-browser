@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { Connection } from "../../src/browser/cdp.ts";
-import type { Tab } from "../../src/browser/tab.ts";
+import type { BrowserSolve, Tab } from "../../src/browser/tab.ts";
 import type { Decider, DecisionRequest } from "../../src/decider/systemone.ts";
 import type { BrowserOptions } from "../../src/index.ts";
 import { Browser } from "../../src/index.ts";
@@ -293,5 +293,55 @@ describe("a run's steps as they are heard", () => {
       widths: [768, 1_600, 768, 1_600],
     });
     expect(await steps({ screenshot: "scaled" })).toEqual({ readable: [undefined, undefined], widths: [768, 768] });
+  });
+});
+
+/** A checkout behind a verification challenge, as HardBench eventbrite_tickets_book_76 meets Eventbrite's hCaptcha. */
+const CHECKOUT: MadePage = {
+  url: "https://tickets.test/checkout",
+  title: "Checkout",
+  body: [main(heading("Checkout"), "Please try again.", button("Verify Answers"))],
+};
+const CHECKOUT_SITE: Site = { start: "checkout", pages: { checkout: () => CHECKOUT } };
+
+describe("a run on a page whose verification challenge the browser solves itself", () => {
+  /** SOLVE_CAPTCHA, then DONE, the browser's own solving ending as said: what the run said, and its tab. */
+  async function solving(browserSolving: BrowserSolve): Promise<{ recent: string; tab: FakeTab; asked: number }> {
+    const tab = new FakeTab(CHECKOUT_SITE);
+    tab.browserSolving = browserSolving;
+    let taken = 0;
+    const decider = scripted(() => {
+      taken += 1;
+      return taken === 1 ? "SOLVE_CAPTCHA" : "DONE";
+    });
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const result = await run(
+        pagesOf(tab),
+        { goal: "Book one free ticket" },
+        { profile: DEFAULT_PROFILE, decider, screenshot: "none" },
+      );
+      return { recent: result.recent.join("\n"), tab, asked: decider.requests.length };
+    } finally {
+      vi.useRealTimers();
+    }
+  }
+
+  it("waits for it before every read, and SOLVE_CAPTCHA tells that the browser solved it", async () => {
+    const { recent, tab, asked } = await solving("solved");
+    expect(recent).toContain("the platform solved the verification (the browser)");
+    expect(tab.browserSolves).toBeGreaterThan(asked);
+  });
+
+  it("tells why SOLVE_CAPTCHA did not solve it", async () => {
+    expect((await solving("unfinished")).recent).toContain(
+      "the platform could not solve the verification: the browser's own solving did not end in time",
+    );
+    expect((await solving("failed")).recent).toContain(
+      "the platform could not solve the verification: the browser's own solving failed",
+    );
+    expect((await solving("none")).recent).toContain(
+      "the platform could not solve the verification: no solver is set up",
+    );
   });
 });

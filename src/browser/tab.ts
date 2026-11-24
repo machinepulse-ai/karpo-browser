@@ -76,6 +76,12 @@ export type SettleEnd =
   | "cap_unreadable"
   | "unchanged";
 
+/**
+ * How the browser's own solving of a verification challenge, going on when it was waited for, ended: solved, failed,
+ * still going when the wait ran out ("unfinished"), or none was going on ("none").
+ */
+export type BrowserSolve = "solved" | "failed" | "unfinished" | "none";
+
 /** What a settle counts as quiet: the document unchanged this long, and the page's own network still this long (ms). */
 export interface SettleRules {
   quietMs: number;
@@ -168,6 +174,20 @@ const OPEN_DATA_TYPES = ["XHR", "Fetch", "Script"];
 const SETTLE_KIND = "settle";
 const ACTION_KIND = "action";
 const WAIT_KIND = "wait";
+/**
+ * What a browser that solves verification challenges itself writes to the page's console as it does (Browserbase,
+ * with captcha solving on): a solving began, then it ended solved or not.
+ */
+const SOLVING_STARTED = "browserbase-solving-started";
+const SOLVING_FINISHED = "browserbase-solving-finished";
+const SOLVING_ERRORED = "browserbase-solving-errored";
+/**
+ * The longest a read waits for such a solving to end. Browserbase says 5 to 30 s; on Eventbrite's checkout hCaptcha
+ * (2026-11-21) it took 18 to 42 s, the page moving on about 3 s after.
+ */
+const BROWSER_SOLVE_MAX_MS = 60_000;
+/** What the browser's timings name a wait for the browser's own solving. */
+const SOLVE_KIND = "captcha";
 /** The CDP domain of what a person does: a command in it is input reaching the page. */
 const INPUT_DOMAIN = "Input.";
 /** How long a click waits after centring a covered element before looking again. */
@@ -375,6 +395,10 @@ export class Tab {
   private lastInput = 0;
   /** The tabs this tab opened. */
   private readonly opened = new Map<string, OpenedTab>();
+  /** When the browser's own solving of a verification challenge on the page began, while one is going on. */
+  private solvingSince: number | undefined;
+  /** Whether the last of those to end was solved. */
+  private lastSolved = false;
 
   private constructor(connection: Connection, targetId: string, sessionId: string) {
     this.connection = connection;
@@ -526,6 +550,28 @@ export class Tab {
    */
   settleOpened(maxMs: number, kind = SETTLE_KIND): Promise<SettleEnd> {
     return this.settleSince(Date.now(), maxMs, false, kind, true);
+  }
+
+  /**
+   * Waits while the browser itself solves a verification challenge on the page, as the page's console tells
+   * (`SOLVING_STARTED`, then `SOLVING_FINISHED` or `SOLVING_ERRORED`), at most `maxMs` and not past `signal`: how that
+   * solving ended. One still going when the wait ends is not waited for again. In the browser's timings as a `captcha`
+   * settle.
+   */
+  async browserSolve(maxMs = BROWSER_SOLVE_MAX_MS, signal?: AbortSignal): Promise<BrowserSolve> {
+    const since = this.solvingSince;
+    if (since === undefined) return "none";
+    const started = Date.now();
+    while (this.solvingSince === since && !this.isGone && !signal?.aborted && Date.now() - started < maxMs) {
+      await this.connection.wait(SETTLE_POLL_MS);
+    }
+    let end: BrowserSolve = this.lastSolved ? "solved" : "failed";
+    if (this.solvingSince === since) {
+      end = "unfinished";
+      this.solvingSince = undefined;
+    }
+    this.connection.timings.settled(SOLVE_KIND, Date.now() - started, end);
+    return end;
   }
 
   /** The time a capture of the page took, for the browser's timings. */
@@ -966,6 +1012,15 @@ export class Tab {
     }
     if (sessionId === undefined || (!onPage && !this.children.has(sessionId))) return;
     switch (method) {
+      case "Runtime.consoleAPICalled": {
+        const said = string(member(items(member(params, "args"))[0], "value"));
+        if (said === SOLVING_STARTED) this.solvingSince = Date.now();
+        else if (said === SOLVING_FINISHED || said === SOLVING_ERRORED) {
+          this.solvingSince = undefined;
+          this.lastSolved = said === SOLVING_FINISHED;
+        }
+        break;
+      }
       case "Network.requestWillBeSent": {
         const type = text("type");
         if (type === undefined || !OPEN_ENDED.includes(type)) {

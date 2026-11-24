@@ -90,6 +90,13 @@ const WHOLE_NUMBER = /^\d+$/;
 const STOPPED = "the run was stopped";
 /** Why a verification is not solved where the caller gave no solver. */
 const NO_SOLVER = "no solver is set up";
+/** Who solved a verification the browser solved itself, as the note names it. */
+const BROWSER_SOLVER = "the browser";
+/** Why a verification the browser was solving itself is not solved, where the caller gave no solver. */
+const BROWSER_NOT_SOLVED = {
+  failed: "the browser's own solving failed",
+  unfinished: "the browser's own solving did not end in time",
+} as const;
 /** How many of a dropdown's options a SELECT none of whose options fit lists in its note. */
 const NONE_FIT_OPTIONS = 20;
 /** The most FILL and SELECT follow-ups asked in the step's own request (`mergeFollowups`). */
@@ -136,7 +143,10 @@ export interface RunOptions {
   decider: Decider;
   /** Stops the run from outside. */
   signal?: AbortSignal | undefined;
-  /** Solves the verification challenge the page shows; without it SOLVE_CAPTCHA, when chosen, says nothing can. */
+  /**
+   * Solves the verification challenge the page shows, when the browser is not solving it itself; without it
+   * SOLVE_CAPTCHA, when chosen and the browser solves nothing, says nothing can.
+   */
   solveCaptcha?: ((tab: Tab, signal?: AbortSignal) => Promise<CaptchaOutcome>) | undefined;
   /** Hears each step as it is decided. */
   onStep?: ((step: StepRecord) => void) | undefined;
@@ -476,6 +486,8 @@ class Run {
 
   /** The page read: the tree the model reads, its state, and whether the document was still loading. */
   private async read(): Promise<{ reading: Reading; loading: boolean }> {
+    // A page the browser is solving a verification on is read once that is over: what follows it is the page.
+    await this.tab.browserSolve(undefined, this.options.signal);
     const [capture, ready] = await Promise.all([
       captureTab(this.tab),
       this.tab.evaluate(READY_STATE).catch(() => undefined),
@@ -880,18 +892,23 @@ class Run {
   }
 
   /**
-   * SOLVE_CAPTCHA: the caller's solver. The option is offered whether or not there is one, as the model's requests
-   * always offered it; chosen where nothing can solve, it is said so and not offered again in that page state.
+   * SOLVE_CAPTCHA: the browser's own solving, when it is solving the challenge itself (Browserbase), waited for; else
+   * the caller's solver. The option is offered whether or not there is one, as the model's requests always offered it;
+   * chosen where nothing can solve, it is said so and not offered again in that page state.
    */
   private async solveCaptcha(reading: Reading): Promise<Taken> {
     const taken = takenOnPage(actions.SOLVE_CAPTCHA);
+    const byBrowser = await this.tab.browserSolve(undefined, this.options.signal);
+    if (byBrowser === "solved") {
+      return { ...taken, note: this.texts.fill(EFFECT_CAPTCHA_SOLVED, { provider: BROWSER_SOLVER }) };
+    }
     const solve = this.options.solveCaptcha;
     const solved: CaptchaOutcome = solve
       ? await solve(this.tab, this.options.signal).catch((error: unknown) => ({
           outcome: "failed",
           reason: said(error),
         }))
-      : { outcome: "failed", reason: NO_SOLVER };
+      : { outcome: "failed", reason: byBrowser === "none" ? NO_SOLVER : BROWSER_NOT_SOLVED[byBrowser] };
     if (solved.outcome === "solved") {
       return { ...taken, note: this.texts.fill(EFFECT_CAPTCHA_SOLVED, { provider: solved.provider }) };
     }

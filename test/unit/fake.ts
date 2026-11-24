@@ -8,7 +8,7 @@
 import { createHash } from "node:crypto";
 import type { Connection } from "../../src/browser/cdp.ts";
 import type { Pages } from "../../src/browser/pages.ts";
-import type { SettleRules, Shot, Tab } from "../../src/browser/tab.ts";
+import type { BrowserSolve, SettleRules, Shot, Tab } from "../../src/browser/tab.ts";
 import { Timings } from "../../src/browser/timings.ts";
 import type { PageCapture, RawSnapshot } from "../../src/contracts/capture.ts";
 import { SNAPSHOT_STYLES } from "../../src/contracts/capture.ts";
@@ -301,6 +301,10 @@ export class FakeTab {
   /** What was typed into boxes, and the options set on dropdowns (by live index and text), by backend node id. */
   readonly filled = new Map<number, string>();
   readonly selected: [number, number, string][] = [];
+  /** How the browser's own solving of a verification ends when it is waited for (none goes on, unless a test says so). */
+  browserSolving: BrowserSolve = "none";
+  /** How often it was waited for. */
+  browserSolves = 0;
   private readonly site: Site;
   private readonly entries: string[];
   private current = 0;
@@ -414,6 +418,11 @@ export class FakeTab {
 
   async selectIndex(backendNodeId: number, _session: string, index: number, text: string): Promise<void> {
     this.selected.push([backendNodeId, index, text]);
+  }
+
+  async browserSolve(): Promise<BrowserSolve> {
+    this.browserSolves += 1;
+    return this.browserSolving;
   }
 
   async settle(maxMs?: number, kind?: string, rules?: SettleRules): Promise<string> {
