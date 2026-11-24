@@ -18,3 +18,7 @@ The first public release.
 - FILL sets a slider to the value it is to show ("2:00 PM", "$500"), by the slider's own words for its value
   (`aria-valuetext`) or else its value: a native range through the element, any other slider by arrow keys. A slider
   that does not come to show the value is put back, and the step says what it holds.
+- A read waits while the browser solves a verification challenge itself, as Browserbase with captcha solving on
+  says in the page's console (`browserbase-solving-started`, then `-finished` or `-errored`): at most 60 s, not past a
+  run's stop. SOLVE_CAPTCHA waits for that solving too and says the browser solved it. A browser that says nothing of
+  the kind is read as before.

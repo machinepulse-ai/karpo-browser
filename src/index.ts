@@ -189,7 +189,10 @@ export interface BrowserOptions {
    * that moves on during the read may give another entry); on, left out; `false` asks once it is read.
    */
   backWithRead?: boolean | undefined;
-  /** Solves the verification challenge a page shows; without it SOLVE_CAPTCHA, when the model chooses it, does nothing. */
+  /**
+   * Solves the verification challenge a page shows, when the browser is not solving it itself (Browserbase with captcha
+   * solving on is, and SOLVE_CAPTCHA waits for that first); without it SOLVE_CAPTCHA otherwise does nothing.
+   */
   solveCaptcha?: ((tab: Tab, signal?: AbortSignal) => Promise<CaptchaOutcome>) | undefined;
   /**
    * The longest a page opened by address (or by a move in the history) is given to settle, in ms; 3.5 s, left out
@@ -381,8 +384,9 @@ export class Browser {
     return this.readTab(this.tab);
   }
 
-  /** A tab's page as `read` reads it. */
+  /** A tab's page as `read` reads it: once the browser's own solving of a verification there, if any, is over. */
   private async readTab(tab: Tab): Promise<PageRead> {
+    await tab.browserSolve();
     const capture = await captureTab(tab);
     maskTexts(capture, this.pages.typedTexts());
     const profile = this.options.profile ?? DEFAULT_PROFILE;
