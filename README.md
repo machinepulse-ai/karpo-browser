@@ -279,3 +279,5 @@ Copyright (c) 2026 MachinePulse Pte. Ltd.
 The code in this repository is licensed under the Apache License, Version 2.0 ([LICENSE](LICENSE)), except
 [`evals/stagehand/stagehand.patch`](evals/stagehand/stagehand.patch), which is under Stagehand's MIT license
 ([LICENSE-stagehand](evals/stagehand/LICENSE-stagehand)).
+
+<sub>Partnership Community: <a href="https://linux.do">LINUX DO</a></sub>
