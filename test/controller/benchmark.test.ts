@@ -36,7 +36,6 @@ describe("the benchmark configuration", () => {
       wholeAnswer: true,
       showEvidence: true,
       compare: true,
-      checkFirst: true,
     });
   });
 

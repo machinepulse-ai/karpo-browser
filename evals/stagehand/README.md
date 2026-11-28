@@ -1,7 +1,7 @@
 # Browserbase Benchmark v2 with Stagehand's eval harness
 
 How to run karpo-browser on Browserbase Benchmark v2 (HardBench: 102 tasks on live sites, each judged by its own
-rubric) with Stagehand's open-source eval harness, using the current benchmark preset: the controller in
+rubric) with Stagehand's open-source eval harness, in the configuration of our published runs: the controller in
 `test/controller` as System 2 and a decision model as System 1, with the configuration in
 `test/controller/benchmark.ts`, except that System 2's provider is left to OpenRouter. Ours was served by a single
 provider; with another, speed and cost differ.
@@ -157,8 +157,6 @@ done, each with its screenshot. The answer is due 450 s after the start: our set
 of everything the agent writes, and so is System 1's address as `SYSTEM1_URL` gives it, with its host and port. A host
 name shorter than 8 characters is hidden only as part of the address, and other forms that a connection error may
 quote, such as the IP address the host name resolves to, are not hidden.
-
-The current preset asks the controller to check its first proposed answer against the task when time and browser actions allow. Earlier published runs used a preset without this check.
 
 ## What the results depend on
 
