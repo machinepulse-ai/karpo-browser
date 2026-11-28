@@ -5,7 +5,14 @@
  */
 
 /** A value of an answer: an amount with its currency, a percentage, a decimal or a whole number. */
-const VALUE = /(?:([$€£¥]|usd|eur|gbp)\s?)?(\d[\d,]*(?:\.\d+)?)(\s?%)?/gi;
+const VALUE = /(?:([$€£¥]|\b(?:usd|eur|gbp))\s*)?(\d[\d,]*(?:\.\d+)?)(\s?%)?(?:\s*(usd|eur|gbp)\b(?!\s*\d))?/gi;
+/** Currency symbols and ISO codes accepted as equivalent ways of writing a price. */
+const CURRENCIES = [
+  { symbol: "$", code: "usd", prefix: /\$|\busd/ },
+  { symbol: "€", code: "eur", prefix: /€|\beur/ },
+  { symbol: "£", code: "gbp", prefix: /£|\bgbp/ },
+  { symbol: "¥", code: "", prefix: /¥/ },
+];
 /** The fewest digits a whole number without a currency needs to be checked: smaller ones are too common to tell. */
 const MIN_DIGITS = 3;
 /** The most values one note names. */
@@ -21,6 +28,7 @@ interface Value {
   text: string;
   /** Its number without separators, and without decimals that are all zeros. */
   core: string;
+  currency: string | undefined;
   percent: boolean;
   /** An amount, a percentage or a decimal: a value a page states, as a bare whole number may not be. */
   stated: boolean;
@@ -29,20 +37,29 @@ interface Value {
 function valuesOf(answer: string): Value[] {
   const found = new Map<string, Value>();
   for (const match of answer.matchAll(VALUE)) {
-    const [whole, currency, number, percent] = match;
+    const [whole, prefix, number, percent, suffix] = match;
+    const currency = (prefix ?? suffix)?.toLowerCase();
     if (number === undefined) continue;
     const plain = number.replace(/,/g, "").replace(/\.0+$/, "");
     const decimal = plain.includes(".");
     const stated = Boolean(currency) || Boolean(percent) || decimal;
     if (!stated && plain.replace(/\D/g, "").length < MIN_DIGITS) continue;
     const text = whole.trim().replace(/[,.]+$/, "");
-    if (!found.has(text)) found.set(text, { text, core: plain, percent: Boolean(percent), stated });
+    if (!found.has(text)) found.set(text, { text, core: plain, currency, percent: Boolean(percent), stated });
   }
   return [...found.values()];
 }
 
 function shownIn(read: string, value: Value): boolean {
   const core = value.core.replace(/\./g, "\\.");
+  if (value.currency) {
+    const amount = `${core}(?:\\.0+)?(?!\\d|\\.\\d)`;
+    const { prefix: marker, code } = CURRENCIES.find((c) => c.symbol === value.currency || c.code === value.currency)!;
+    const prefix = `(?:${marker.source})\\s*`;
+    if (!code) return new RegExp(`${prefix}${amount}`).test(read);
+    const suffix = `\\s*${code}\\b(?!\\s*\\d)`;
+    return new RegExp(`${prefix}${amount}|(?<![\\d.])${amount}${suffix}`, "i").test(read);
+  }
   const pattern = value.percent
     ? new RegExp(`(?<![\\d.])${core}\\s?%`)
     : new RegExp(`(?<![\\d.])${core}(?:\\.0+)?(?!\\d|\\.\\d)`);

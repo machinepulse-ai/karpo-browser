@@ -813,6 +813,14 @@ function wholeFromZero(name: string, value: number | undefined): void {
   }
 }
 
+/** Stops a model request, including its HTTP retries, at the end of the time reserved for it. */
+function until(deadline: number | undefined, outside: AbortSignal | undefined): AbortSignal | undefined {
+  if (deadline === undefined) return outside;
+  const left = deadline - Date.now();
+  const clock = left > 0 ? AbortSignal.timeout(Math.ceil(left)) : AbortSignal.abort();
+  return outside ? AbortSignal.any([outside, clock]) : clock;
+}
+
 /** Works a task said in words to its answer, through a System 2 model and its tools. */
 export async function control(
   browser: ControllerBrowser,
@@ -826,6 +834,7 @@ export async function control(
   const started = Date.now();
   /** When the answer is due: the run is stopped and the last word asked for a margin before the deadline. */
   const due = options.deadline === undefined ? undefined : options.deadline - FINISH_MARGIN_MS;
+  const workSignal = until(due, options.signal);
   const usage: Usage = { input: 0, output: 0 };
   const timing = { modelMs: 0, toolMs: 0 };
   /** A model turn, its time counted. */
@@ -878,15 +887,13 @@ export async function control(
   /** One last turn with finish alone, for the answer the task would otherwise end without. */
   const lastWord = async (end: ControlEnd, turns: number): Promise<ControlResult> => {
     if (options.signal?.aborted) return ended(lastWords, false, "interrupted", turns);
+    const finishSignal = until(options.deadline, options.signal);
+    if (finishSignal?.aborted) return ended(lastWords, false, "time", turns);
     messages.push({ role: "user", content: LAST_WORD });
     try {
       // The last word must be a call to finish: a turn of words alone left tasks without an answer.
-      const turn = await asked(
-        { ...options.model, toolChoice: "required" },
-        messages,
-        tools.FINISH_ONLY,
-        options.signal,
-      );
+      const turn = await asked({ ...options.model, toolChoice: "required" }, messages, tools.FINISH_ONLY, finishSignal);
+      finishSignal?.throwIfAborted();
       addUsage(usage, turn.usage);
       const finish = turn.calls.find((call) => call.name === tools.FINISH);
       const answer = finish ? safeArgs(finish).answer : undefined;
@@ -913,15 +920,17 @@ export async function control(
   let routine = false;
   for (let turns = 1; turns <= maxTurns; turns++) {
     if (options.signal?.aborted) return ended(lastWords, false, "interrupted", turns - 1);
-    if (controller.late) return lastWord("time", turns - 1);
+    if (controller.late || workSignal?.aborted) return lastWord("time", turns - 1);
     const offered = controller.offered();
     const model =
       routine && options.quickReasoning ? { ...options.model, reasoning: options.quickReasoning } : options.model;
     let turn: Awaited<ReturnType<AskTurn>>;
     try {
-      turn = await asked(model, messages, offered, options.signal);
+      turn = await asked(model, messages, offered, workSignal);
+      workSignal?.throwIfAborted();
     } catch (error) {
       if (options.signal?.aborted) return ended(lastWords, false, "interrupted", turns - 1);
+      if (workSignal?.aborted) return lastWord("time", turns - 1);
       throw error;
     }
     addUsage(usage, turn.usage);

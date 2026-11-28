@@ -202,6 +202,37 @@ describe("control", () => {
 });
 
 describe("control's last word and its history", () => {
+  it("cancels a pending model turn in time for a finish-only answer", async () => {
+    const browser = new FakeBrowser();
+    const ask: AskTurn = async (_model, _messages, tools, signal) => {
+      if (tools.length === 1 && tools[0]?.name === "finish") return calls(["finish", { answer: "Partial result" }]);
+      expect(signal).toBeDefined();
+      await new Promise<void>((_, reject) => signal!.addEventListener("abort", () => reject(signal!.reason)));
+      throw new Error("unexpected continuation");
+    };
+    const done = await control(browser, "Read the details", { model: MODEL, ask, deadline: Date.now() + 45_030 });
+    expect(done).toMatchObject({ end: "time", answered: true, answer: "Partial result", browserActions: 0 });
+  });
+
+  it("bounds the finish-only turn by the task deadline", async () => {
+    const ask: AskTurn = async (_model, _messages, tools, signal) => {
+      expect(tools.map((tool) => tool.name)).toEqual(["finish"]);
+      expect(signal).toBeDefined();
+      return new Promise((_, reject) => signal!.addEventListener("abort", () => reject(signal!.reason)));
+    };
+    let timedOut = false;
+    const observe: AskTurn = async (...args) => {
+      try {
+        return await ask(...args);
+      } finally {
+        timedOut = args[3]?.aborted === true;
+      }
+    };
+    const done = await control(new FakeBrowser(), "Read", { model: MODEL, ask: observe, deadline: Date.now() + 50 });
+    expect(timedOut).toBe(true);
+    expect(done).toMatchObject({ end: "time", answered: false });
+  });
+
   it("asks again after empty turns, then asks for the last word with finish alone", async () => {
     const { ask, asked } = scripted([words(""), words(""), words(""), calls(["finish", { answer: "late but there" }])]);
     const done = await control(new FakeBrowser(), "t", { model: MODEL, ask });

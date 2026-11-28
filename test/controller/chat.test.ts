@@ -87,4 +87,17 @@ describe("chat", () => {
     );
     expect(calls).toBe(1);
   });
+
+  it("stops retrying if the task runs out of time while reading a transient error", async () => {
+    const stop = new AbortController();
+    const reason = new Error("answer due");
+    let calls = 0;
+    const fetchImpl = async () => {
+      calls++;
+      stop.abort(reason);
+      return new Response("busy", { status: 503 });
+    };
+    await expect(httpTurns(fetchImpl)({ model: "m" }, [], [], stop.signal)).rejects.toBe(reason);
+    expect(calls).toBe(1);
+  });
 });
