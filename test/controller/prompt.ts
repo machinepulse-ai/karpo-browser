@@ -37,7 +37,7 @@ const ADDRESSES =
   "Use an address the task gives, one you saw on a page, the site's main address, or a DuckDuckGo search (https://duckduckgo.com/?q=your+words) to find the right site when the task names none. Never guess an address; you may change the query parameters of an address the site itself uses when a page showed them.";
 
 const READ_TOOL =
-  "- read_page gives the page as it is now: numbered elements with their states and text, cut into what is in view and what lies above and below it.";
+  "- read_page gives the page as it is now: numbered elements with their states and text, cut into what is in view and what lies above and below it. For a long list or grid, use containing with literal phrases found on the page (such as a column label and a status). It counts all matching lines in the loaded page and returns matching examples. Verify the filters, one line per item and any pagination before using a count.";
 
 const SHOW_TOOL =
   "- show brings a text of the page into view, as a person scrolls to it. A fact you report must have been in view on its page: before you leave a page whose facts you will report, show each of them (several shows can go in one turn). It is not an action by hand.";
@@ -50,7 +50,7 @@ const TOGETHER =
   "- The calls of a turn are carried out in order, on the one tab, and the rest of a turn is left undone after a call that does not go through or that changes the page (open, run_browser_agent, an action by hand): only shows and read_page go before another call of the same turn.";
 
 const PAGE_IN_ANSWERS =
-  "- Every open and every action by hand answers with the page as it is after it: read_page is only for a page that has changed since.";
+  "- Every open and every action by hand answers with the page as it is after it: read_page is useful when the page has changed or you need matching lines beyond the excerpt.";
 
 const COMPARE_TOOL = `- compare opens ${MIN_COMPARED} to ${MAX_COMPARED} addresses at once, each in a background tab of its own, and answers each page's title, address and lines; with look_for, the lines around those words come first. The tab in front stays as it is, and each page counts as one action on the browser. Use it when several candidate pages must be checked side by side (offers, listings, products) rather than opening them one by one. Its pages' element numbers are not the tab's, and a fact you report must still be shown on the page in front before you finish: open the chosen page and show its facts there.`;
 
@@ -95,7 +95,9 @@ const GOALS = `## Goals for run_browser_agent
 - Include every condition of the task, even ones that may already hold: dates, party size, the exact item. Keep exact dates and times.
 - field_values holds every value the goal needs typed, a search's words as much as a form's details, each under what it is for on the site ("search", "guest name"): only these can be typed. A secret listed with the task is typed by its name: say in the goal that it is to be used.
 - Before adding or selecting an item, verify that the exact variant meets every required attribute on its listing or detail page. A similar item is a substitute only when the task allows one. After the action, check the resulting selection or cart.
+- When a task asks for multiple items, keep a checklist of each requested item and verify each one separately in the resulting cart or page before finishing. A related item that satisfies only part of the wording does not complete the other item.
 - A goal ends where a judgment is needed or where what the task asks is shown: end it at the results list with the task's conditions applied, read the list yourself, then name the chosen item in the next goal.
+- If a result triggers a follow-up the person requested, collect its details while that result is open. An unavailable date or listing and a detail you have yet to open are different outcomes. Read back the active dates, quantities and filters before comparing totals. Respect the task's stopping point.
 - The decision model remembers nothing between runs and keeps no notes of what pages said: collect what the answer needs across pages yourself.
 - A goal that already holds on the page ends the run at once: name the step still to be reached.
 - Do not authorize paying, booking, sending or anything else that cannot be undone unless the task says to go ahead.`;

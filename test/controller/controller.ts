@@ -5,7 +5,7 @@
  * page are few and counted.
  */
 import type { ComparedPage, ManualAction, RunControls, RunInput, RunResult, StepRecord } from "../../src/index.ts";
-import { DONE_STEP, imagePart, isEnding } from "../../src/index.ts";
+import { DONE_STEP, imagePart, isEnding, pageExcerpt } from "../../src/index.ts";
 import type { AskTurn, ChatModel, ToolCall, ToolSpec, Usage } from "./chat.ts";
 import { httpTurns, pause } from "./chat.ts";
 import { evidenceText } from "./evidence.ts";
@@ -77,6 +77,8 @@ const SHOT_CAPTION = "The page's screenshot after the last action.";
 const LEFT_OUT = "(the rest is left out: read_page reads the page as it is now)";
 const LAST_WORD =
   "Finish now with finish: give the best answer to the task from what you have read, or say what stopped it.";
+const FINAL_TEXT =
+  "Browsing has ended. Reply directly in the format the person requested. Use the evidence already collected and identify any missing fields.";
 const HANDS_CLOSED =
   "Actions by hand are offered only right after a run stops short of its goal: give run_browser_agent this as a goal (the outcome to reach), or read the page.";
 const LEFT_UNDONE =
@@ -317,17 +319,12 @@ interface Told {
   image?: ToolEvent["image"];
 }
 
-function shown(lines: readonly string[], most: number): string {
-  const more = lines.length - most;
-  return more > 0 ? `${lines.slice(0, most).join("\n")}\n(${more} more lines)` : lines.join("\n");
-}
-
 function reportOf(result: RunResult): string {
   return [
     `${result.status}${result.detail ? `: ${result.detail}` : ""}`,
     `Page: ${result.title} (${result.url}), after ${result.steps} steps and ${Math.round(result.seconds)} s`,
     `Latest actions:\n${result.recent.join("\n") || "(none)"}`,
-    `The page as the run last read it:\n${shown(result.page, PAGE_MAX_LINES)}`,
+    `The page as the run last read it:\n${pageExcerpt(result.page, PAGE_MAX_LINES)}`,
   ].join("\n\n");
 }
 
@@ -628,7 +625,7 @@ class Controller {
       this.actions++;
       await this.browser.open(url);
       const page = await this.browser.read();
-      const lines = shown(page.lines, this.options.openFullPage ? PAGE_MAX_LINES : OPENED_LINES);
+      const lines = pageExcerpt(page.lines, this.options.openFullPage ? PAGE_MAX_LINES : OPENED_LINES);
       return {
         text: `Opened: ${page.title} (${page.url})\n\n${lines}`,
         ok: true,
@@ -638,7 +635,10 @@ class Controller {
     if (name === tools.READ) {
       this.actions++;
       const page = await this.browser.read();
-      return { text: `${page.title} (${page.url})\n\n${shown(page.lines, PAGE_MAX_LINES)}`, ok: true };
+      return {
+        text: `${page.title} (${page.url})\n\n${pageExcerpt(page.lines, PAGE_MAX_LINES, args.containing)}`,
+        ok: true,
+      };
     }
     if (this.manual >= this.maxManual) return { text: manualSpent(this.maxManual), ok: false };
     const action = manualActionOf(name, args);
@@ -648,7 +648,7 @@ class Controller {
     const effect = await this.browser.act(action);
     const page = await this.browser.read();
     return {
-      text: `${effect}\n\nThe page now: ${page.title} (${page.url})\n${shown(page.lines, PAGE_MAX_LINES)}`,
+      text: `${effect}\n\nThe page now: ${page.title} (${page.url})\n${pageExcerpt(page.lines, PAGE_MAX_LINES)}`,
       ok: true,
       shot: await this.shot(),
     };
@@ -889,21 +889,30 @@ export async function control(
     if (options.signal?.aborted) return ended(lastWords, false, "interrupted", turns);
     const finishSignal = until(options.deadline, options.signal);
     if (finishSignal?.aborted) return ended(lastWords, false, "time", turns);
-    messages.push({ role: "user", content: LAST_WORD });
-    try {
-      // The last word must be a call to finish: a turn of words alone left tasks without an answer.
-      const turn = await asked({ ...options.model, toolChoice: "required" }, messages, tools.FINISH_ONLY, finishSignal);
-      finishSignal?.throwIfAborted();
-      addUsage(usage, turn.usage);
-      const finish = turn.calls.find((call) => call.name === tools.FINISH);
-      const answer = finish ? safeArgs(finish).answer : undefined;
-      if (typeof answer === "string" && answer.trim()) return ended(answer, true, end, turns + 1);
-      if (turn.text.trim()) return ended(turn.text, true, end, turns + 1);
-    } catch {
-      // A last word that could not be had leaves the task as it ended.
-      if (options.signal?.aborted) return ended(lastWords, false, "interrupted", turns);
+    const model = { ...options.model, reasoning: options.quickReasoning ?? options.model.reasoning };
+    for (const withTool of [true, false]) {
+      if (finishSignal?.aborted) break;
+      turns++;
+      const prompt = { role: "user", content: withTool ? LAST_WORD : FINAL_TEXT };
+      try {
+        const turn = await asked(
+          withTool ? { ...model, toolChoice: "required" } : model,
+          [...messages, prompt],
+          withTool ? tools.FINISH_ONLY : [],
+          finishSignal,
+        );
+        finishSignal?.throwIfAborted();
+        addUsage(usage, turn.usage);
+        const finish = turn.calls.find((call) => call.name === tools.FINISH);
+        const answer = finish ? safeArgs(finish).answer : undefined;
+        if (typeof answer === "string" && answer.trim()) return ended(answer, true, end, turns);
+        if (turn.text.trim()) return ended(turn.text, true, end, turns);
+      } catch {
+        if (options.signal?.aborted) return ended(lastWords, false, "interrupted", turns);
+        // A provider may reject the forced tool call. The same evidence can still be answered in words.
+      }
     }
-    return ended(lastWords, false, end, turns + 1);
+    return ended(lastWords, false, end, turns);
   };
   const maxTurns = options.maxTurns ?? DEFAULT_MAX_TURNS;
   /** The tools that, all gone through in a turn, have the next turn asked with the quick reasoning effort. */
@@ -995,7 +1004,7 @@ async function readStart(browser: ControllerBrowser, timing: { toolMs: number })
   const began = Date.now();
   const page = await browser.read().catch(() => undefined);
   timing.toolMs += Date.now() - began;
-  return page && `${page.title} (${page.url})\n\n${shown(page.lines, PAGE_MAX_LINES)}`;
+  return page && `${page.title} (${page.url})\n\n${pageExcerpt(page.lines, PAGE_MAX_LINES)}`;
 }
 
 /**

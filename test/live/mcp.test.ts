@@ -137,6 +137,12 @@ describe.skipIf(!HAS_CHROME)("the tools over the Model Context Protocol", () => 
       expect((await answerTo(3)).result?.isError).toBeUndefined();
       send({ id: 11, method: "tools/call", params: { name: "read_page", arguments: {} } });
       const page = textOf(await answerTo(11));
+      send({
+        id: 111,
+        method: "tools/call",
+        params: { name: "read_page", arguments: { containing: ["textbox", "Name"] } },
+      });
+      expect(textOf(await answerTo(111))).toMatch(/1 matching line\n.*textbox Name/);
       const number = (words: string) => Number(new RegExp(`(\\d+) ${words}`).exec(page)?.[1]);
       send({
         id: 12,

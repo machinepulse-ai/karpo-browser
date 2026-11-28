@@ -1,5 +1,5 @@
 /**
- * The configuration of our published benchmark runs, defined once: the System 2 model, the deadline, the controller's
+ * The configuration for benchmark runs, defined once: the System 2 model, the deadline, the controller's
  * options and the browser's. System 2's provider is left to OpenRouter's routing (a single one served our runs).
  * `node test/controller/cli.ts --benchmark` runs with it.
  */
@@ -65,5 +65,6 @@ export function benchmarkControlOptions(started: number, now: Date): Omit<Contro
     wholeAnswer: true,
     showEvidence: true,
     compare: true,
+    checkFirst: true,
   };
 }

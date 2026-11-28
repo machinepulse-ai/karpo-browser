@@ -69,6 +69,7 @@ export type {
 export { DecisionFailed, OPENROUTER_DECISIONS_URL, SystemOneDecider } from "./decider/systemone.ts";
 export type { Profile } from "./profile.ts";
 export { DEFAULT_PROFILE } from "./profile.ts";
+export { pageExcerpt } from "./reading/excerpt.ts";
 export { isWeb } from "./reading/state.ts";
 export type { ReadingSettings } from "./reading/tree.ts";
 export type { CaptchaOutcome, RunInput, RunResult, RunStatus, StepRecord } from "./run/run.ts";

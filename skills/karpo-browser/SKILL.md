@@ -19,7 +19,7 @@ by hand only where it is stuck, and answer.
   reached, a form filled up to where the goal says to stop. It acts; it does not read lists through, compare offers
   or report: you read the page it returns.
 - `read_page` gives the page as it is now: numbered elements with their states and text, cut into what is in view
-  and what lies above and below it.
+  and what lies above and below it. Pass literal phrases in `containing` to count and read matching lines across the full loaded page.
 - `click`, `type`, `select`, `press_enter`, `escape`, `scroll` and `back` act once by hand, on an element numbered as
   `read_page` or the last result shows it.
 - `screenshot` shows the viewport, for what the page's look says: a chart, a map, a layout, a challenge.
