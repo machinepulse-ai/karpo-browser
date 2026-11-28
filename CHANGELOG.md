@@ -4,6 +4,8 @@
 
 The first public release.
 
+- `read_page` accepts an optional `containing` list to search the loaded accessibility tree and count matching lines.
+
 - System 1 over the System One protocol: hosted decision models on OpenRouter or your own server (`SYSTEM1_URL`,
   `SYSTEM1_MODEL`, `SYSTEM1_API_KEY`), with typed requests and answers and each known model's limits.
 - `karpo-browser run`: one goal worked by System 1 alone.

@@ -19,6 +19,13 @@ describe("an answer's values", () => {
     expect(unseenValues("rent $20, fee $350, from $1,299, 15% off", read)).toEqual([]);
     expect(unseenValues("fee $35 and $129", read)).toEqual(["$35", "$129"]);
   });
+
+  it("checks the currency of a fee even if a page number or a time matches its digits", () => {
+    const read = normalized("10 link Calendar · starts 10:30 · camping USD 36.00 · tickets €12 · tax 8 GBP");
+    expect(unseenValues("fee $10, ticket $12, nightly €36", read)).toEqual(["$10", "$12", "€36"]);
+    expect(unseenValues("camping $36, ticket EUR 12, tax £8", read)).toEqual([]);
+    expect(unseenValues("fee $3, nightly $360", read)).toEqual(["$3", "$360"]);
+  });
 });
 
 describe("a chat answer's usage", () => {

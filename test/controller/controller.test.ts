@@ -95,6 +95,29 @@ function toolTexts(messages: unknown[]): string[] {
 }
 
 describe("control", () => {
+  it("finds matching lines outside the first excerpt of the current tab", async () => {
+    class Calendar extends FakeBrowser {
+      override async read() {
+        return {
+          url: this.url(),
+          title: "Calendar",
+          lines: [
+            ...Array<string>(550).fill("other date"),
+            "541 button Friday: available",
+            "542 button Friday: closed",
+          ],
+        };
+      }
+    }
+    const { ask, asked } = scripted([
+      calls(["read_page", { containing: ["friday", "AVAILABLE"] }]),
+      calls(["finish", { answer: "One available" }]),
+    ]);
+    const done = await control(new Calendar(), "Count the available slots on Friday", { model: MODEL, ask });
+    expect(toolTexts(asked[1]!.messages)[0]).toContain("1 matching line\n541 button Friday: available");
+    expect(done.browserActions).toBe(1);
+  });
+
   it("hands a goal to the decision model and answers with finish", async () => {
     const browser = new FakeBrowser();
     const { ask } = scripted([
@@ -202,6 +225,49 @@ describe("control", () => {
 });
 
 describe("control's last word and its history", () => {
+  it("recovers a final answer in words if the finish-only turn gives unusable arguments", async () => {
+    const { ask, asked } = scripted([
+      calls(["read_page", {}]),
+      calls(["finish", { answer: {} }]),
+      words('{"price":7}'),
+    ]);
+    const done = await control(new FakeBrowser(), "Return the price as JSON", { model: MODEL, ask, maxTurns: 1 });
+    expect(done).toMatchObject({ answer: '{"price":7}', answered: true, end: "turns", browserActions: 1, turns: 3 });
+    expect(asked[2]?.tools).toEqual([]);
+    expect(toolTexts(asked[2]!.messages).join(" ")).toContain("Search");
+  });
+
+  it("cancels a pending model turn in time for a finish-only answer", async () => {
+    const browser = new FakeBrowser();
+    const ask: AskTurn = async (_model, _messages, tools, signal) => {
+      if (tools.length === 1 && tools[0]?.name === "finish") return calls(["finish", { answer: "Partial result" }]);
+      expect(signal).toBeDefined();
+      await new Promise<void>((_, reject) => signal!.addEventListener("abort", () => reject(signal!.reason)));
+      throw new Error("unexpected continuation");
+    };
+    const done = await control(browser, "Read the details", { model: MODEL, ask, deadline: Date.now() + 45_030 });
+    expect(done).toMatchObject({ end: "time", answered: true, answer: "Partial result", browserActions: 0 });
+  });
+
+  it("bounds the finish-only turn by the task deadline", async () => {
+    const ask: AskTurn = async (_model, _messages, tools, signal) => {
+      expect(tools.map((tool) => tool.name)).toEqual(["finish"]);
+      expect(signal).toBeDefined();
+      return new Promise((_, reject) => signal!.addEventListener("abort", () => reject(signal!.reason)));
+    };
+    let timedOut = false;
+    const observe: AskTurn = async (...args) => {
+      try {
+        return await ask(...args);
+      } finally {
+        timedOut = args[3]?.aborted === true;
+      }
+    };
+    const done = await control(new FakeBrowser(), "Read", { model: MODEL, ask: observe, deadline: Date.now() + 50 });
+    expect(timedOut).toBe(true);
+    expect(done).toMatchObject({ end: "time", answered: false });
+  });
+
   it("asks again after empty turns, then asks for the last word with finish alone", async () => {
     const { ask, asked } = scripted([words(""), words(""), words(""), calls(["finish", { answer: "late but there" }])]);
     const done = await control(new FakeBrowser(), "t", { model: MODEL, ask });
@@ -602,10 +668,12 @@ describe("control's choices for fewer turns", () => {
   it("tells the controller that opens and actions by hand answer with the page, when asked", async () => {
     const on = scripted([calls(["finish", { answer: "a" }])]);
     await control(new FakeBrowser(), "t", { model: MODEL, ask: on.ask, pageInAnswers: true });
-    expect(systemOf(on.asked)).toContain("read_page is only for a page that has changed since");
+    expect(systemOf(on.asked)).toContain("read_page is useful when the page has changed or you need matching lines");
     const off = scripted([calls(["finish", { answer: "a" }])]);
     await control(new FakeBrowser(), "t", { model: MODEL, ask: off.ask });
-    expect(systemOf(off.asked)).not.toContain("read_page is only for a page that has changed since");
+    expect(systemOf(off.asked)).not.toContain(
+      "read_page is useful when the page has changed or you need matching lines",
+    );
   });
 
   it("keeps as many whole answers and screenshots as asked", () => {

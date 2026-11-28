@@ -128,7 +128,7 @@ how its tools are meant to be used when it starts; the full guide is
 |---|---|
 | `open` | Opens an address and waits for the page to settle |
 | `run_browser_agent` | Gives System 1 a goal and the values to type; answers how the run ended and the page it reached |
-| `read_page` | The page as numbered elements with their states and text |
+| `read_page` | The page as numbered elements with their states and text. Optional `containing` reads and counts lines that include every supplied phrase |
 | `click`, `type`, `select`, `press_enter`, `escape`, `scroll`, `back` | One action by hand, on an element's number |
 | `screenshot` | The viewport as a JPEG |
 
@@ -250,7 +250,7 @@ export SYSTEM2_API_KEY=sk-or-...           # SYSTEM2_BASE_URL is OpenRouter's un
 node test/controller/cli.ts --url https://books.toscrape.com/ "Find the price of the book A Light in the Attic"
 ```
 
-`--benchmark` runs the configuration of our published runs: DeepSeek V4.1 Flash on OpenRouter, the provider left to
+`--benchmark` runs the current evaluation configuration: DeepSeek V4.1 Flash on OpenRouter, the provider left to
 OpenRouter's routing, a 450 s deadline, and the options in `test/controller/benchmark.ts` (set `SYSTEM2_MODEL` to use
 another model with those options). [`evals/stagehand`](evals/stagehand/README.md) runs it on Browserbase Benchmark v2
 with Stagehand's eval harness.

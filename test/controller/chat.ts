@@ -153,15 +153,14 @@ export function turnOf(answer: unknown): Turn {
 /** Waits `ms`, or until a stop from outside. */
 export function pause(ms: number, signal: AbortSignal | undefined): Promise<void> {
   return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    signal?.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timer);
-        resolve();
-      },
-      { once: true },
-    );
+    if (signal?.aborted) return resolve();
+    const timer = setTimeout(done, ms);
+    function done(): void {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", done);
+      resolve();
+    }
+    signal?.addEventListener("abort", done, { once: true });
   });
 }
 
@@ -191,6 +190,7 @@ export function httpTurns(fetchImpl: typeof fetch = fetch): AskTurn {
     });
     let last = "";
     for (let attempt = 1; attempt <= TURN_ATTEMPTS; attempt++) {
+      signal?.throwIfAborted();
       const timeout = AbortSignal.timeout(TURN_TIMEOUT_MS);
       try {
         const response = await fetchImpl(`${baseUrl}/${CHAT_PATH}`, {

@@ -67,8 +67,12 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
   },
   {
     name: READ,
-    description: "The page as it is now: numbered elements with states and text.",
-    parameters: NO_ARGUMENTS,
+    description:
+      "Reads the current page. With containing, counts and lists lines containing all given phrases, ignoring case. The count covers the whole loaded reading.",
+    parameters: {
+      type: "object",
+      properties: { containing: { type: "array", minItems: 1, items: { type: "string" } } },
+    },
   },
   {
     name: SHOW,
